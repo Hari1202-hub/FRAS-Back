@@ -10,10 +10,17 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function () {
+            \Illuminate\Support\Facades\Route::middleware('api')
+                ->prefix('api/v2')
+                ->name('api.v2.')
+                ->group(base_path('routes/api/v2.php'));
+        },
     )
     ->withMiddleware(function (Middleware $middleware) {
          $middleware->alias([
-        'check.api.auth' => \App\Http\Middleware\CheckApiAuth::class,
+        'check.api.auth'  => \App\Http\Middleware\CheckApiAuth::class,
+        'check.app.token' => \App\Http\Middleware\CheckAppToken::class,
     ]);
         $middleware->validateCsrfTokens(except:[
             'api/*',

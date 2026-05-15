@@ -1,0 +1,970 @@
+{
+  "info": {
+    "name": "FRAS API v2",
+    "_postman_id": "fras-api-v2-collection",
+    "description": "Face Recognition Attendance System — API v2\nBase URL: {{base_url}}/api/v2\n\nAfter calling Login the token is automatically saved to the {{token}} variable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "base_url",    "value": "http://localhost",                 "type": "string" },
+    { "key": "token",       "value": "",                                 "type": "string" },
+    { "key": "app_token",   "value": "",                                 "type": "string", "description": "Auto-filled by App Auth / Get Token request" },
+    { "key": "staff_guid",  "value": "replace-with-real-staff-guid",    "type": "string" },
+    { "key": "role_guid",   "value": "replace-with-real-role-guid",     "type": "string" },
+    { "key": "project_guid","value": "replace-with-real-project-guid",  "type": "string" },
+    { "key": "app_uuid",    "value": "replace-with-app-client-uuid",    "type": "string" }
+  ],
+  "item": [
+
+    {
+      "name": "Auth",
+      "item": [
+
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var res = pm.response.json();",
+                  "if (res.data && res.data.access_token) {",
+                  "    pm.collectionVariables.set('token', res.data.access_token);",
+                  "    console.log('Token saved:', res.data.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@fras.com\",\n  \"password\": \"password123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "login"]
+            },
+            "description": "Login with email or emp_id. Token is auto-saved to {{token}} on success."
+          }
+        },
+
+        {
+          "name": "Forgot Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@fras.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "forgot-password"]
+            }
+          }
+        },
+
+        {
+          "name": "Reset Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@fras.com\",\n  \"token\": \"your-reset-token-here\",\n  \"password\": \"newpassword123\",\n  \"password_confirmation\": \"newpassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "reset-password"]
+            }
+          }
+        },
+
+        {
+          "name": "Me (Profile)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "me"]
+            },
+            "description": "Returns the authenticated user's full profile with roles, entities, classifications."
+          }
+        },
+
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var res = pm.response.json();",
+                  "if (res.data && res.data.access_token) {",
+                  "    pm.collectionVariables.set('token', res.data.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "refresh"]
+            }
+          }
+        },
+
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "auth", "logout"]
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Dashboard",
+      "item": [
+
+        {
+          "name": "Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/dashboard?date=2026-05-05",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "dashboard"],
+              "query": [
+                { "key": "date",   "value": "2026-05-05", "description": "Y-m-d (default: today)" },
+                { "key": "entity", "value": "",           "description": "Filter by entity ID (optional)", "disabled": true }
+              ]
+            },
+            "description": "Returns: staff counts (active/enrolled/unenrolled), attendance counts (checked-in/out/absent), 7-day trend, project-level breakdown, top 5 projects."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Staff",
+      "item": [
+
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff?per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff"],
+              "query": [
+                { "key": "search",         "value": "",   "description": "Partial match on name or emp_id", "disabled": true },
+                { "key": "name",           "value": "",   "description": "Name partial", "disabled": true },
+                { "key": "emp_id",         "value": "",   "description": "Exact emp_id", "disabled": true },
+                { "key": "role",           "value": "",   "description": "Role GUID", "disabled": true },
+                { "key": "entity",         "value": "",   "description": "Entity ID or GUID", "disabled": true },
+                { "key": "classification", "value": "",   "description": "Classification code", "disabled": true },
+                { "key": "category",       "value": "",   "description": "Category code", "disabled": true },
+                { "key": "enrolled",       "value": "",   "description": "1 = enrolled, 0 = not enrolled", "disabled": true },
+                { "key": "status",         "value": "1",  "description": "1 = active, 0 = inactive", "disabled": true },
+                { "key": "per_page",       "value": "25", "description": "Records per page" },
+                { "key": "page",           "value": "1",  "description": "Page number" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Enrolled Staff",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff/enrolled?per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff", "enrolled"],
+              "query": [
+                { "key": "search",   "value": "",   "description": "Name or emp_id", "disabled": true },
+                { "key": "entity",   "value": "",   "description": "Entity ID",      "disabled": true },
+                { "key": "role",     "value": "",   "description": "Role GUID",      "disabled": true },
+                { "key": "per_page", "value": "25" },
+                { "key": "page",     "value": "1"  }
+              ]
+            },
+            "description": "Staff who have a face enrolled in the system."
+          }
+        },
+
+        {
+          "name": "Unenrolled Staff",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff/unenrolled?per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff", "unenrolled"],
+              "query": [
+                { "key": "search",   "value": "",   "description": "Name or emp_id", "disabled": true },
+                { "key": "entity",   "value": "",   "description": "Entity ID",      "disabled": true },
+                { "key": "per_page", "value": "25" },
+                { "key": "page",     "value": "1"  }
+              ]
+            },
+            "description": "Active staff with no face enrolled."
+          }
+        },
+
+        {
+          "name": "Staff Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff/{{staff_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff", "{{staff_guid}}"]
+            },
+            "description": "Full detail for one staff member including roles, enrollment status, assigned projects."
+          }
+        },
+
+        {
+          "name": "Create / Upsert Staff",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employees\": [\n    {\n      \"id\": \"EMP001\",\n      \"name\": \"John Doe\",\n      \"entity\": \"Main Entity\",\n      \"classification\": \"Grade A\",\n      \"category\": \"Full Time\",\n      \"email\": \"john.doe@company.com\",\n      \"mobile\": \"0501234567\",\n      \"status\": \"active\",\n      \"reference_id\": \"REF001\"\n    },\n    {\n      \"id\": \"EMP002\",\n      \"name\": \"Jane Smith\",\n      \"entity\": \"Branch Office\",\n      \"classification\": \"Grade B\",\n      \"category\": \"Part Time\",\n      \"email\": \"jane.smith@company.com\",\n      \"mobile\": \"0507654321\",\n      \"status\": \"active\",\n      \"reference_id\": \"REF002\"\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff"]
+            },
+            "description": "Creates new staff or updates existing (matched by reference_id). Entity / classification / category are auto-created if they don't exist."
+          }
+        },
+
+        {
+          "name": "Assign Roles to Staff",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guid\": \"{{staff_guid}}\",\n  \"roles\": [\"Security Guard\", \"Supervisor\"],\n  \"password\": \"newpassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/staff/assign-role",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "staff", "assign-role"]
+            },
+            "description": "Replaces all current roles with the given list. Password field is optional."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Projects",
+      "item": [
+
+        {
+          "name": "List Projects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects?per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects"],
+              "query": [
+                { "key": "search",   "value": "",   "description": "Project name partial", "disabled": true },
+                { "key": "entity",   "value": "",   "description": "Entity ID",            "disabled": true },
+                { "key": "active",   "value": "1",  "description": "1 = active only",      "disabled": true },
+                { "key": "per_page", "value": "25" },
+                { "key": "page",     "value": "1"  }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Nearby Projects (GPS)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/nearby?latitude=24.7136&longitude=46.6753&radius=500",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "nearby"],
+              "query": [
+                { "key": "latitude",  "value": "24.7136", "description": "User GPS latitude (required)"  },
+                { "key": "longitude", "value": "46.6753", "description": "User GPS longitude (required)" },
+                { "key": "radius",    "value": "500",     "description": "Radius in metres (default 300)" }
+              ]
+            },
+            "description": "Returns projects assigned to the authenticated user that are within the given radius of the supplied coordinates."
+          }
+        },
+
+        {
+          "name": "Project Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/{{project_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "{{project_guid}}"]
+            }
+          }
+        },
+
+        {
+          "name": "Create Project",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectid\": \"PRJ-2026-001\",\n  \"projectname\": \"North Campus Security\",\n  \"entity_id\": 1,\n  \"location_shotname\": \"North Campus\",\n  \"location_longname\": \"North Campus Main Gate, Building A\",\n  \"latitude\": \"24.7136\",\n  \"longitude\": \"46.6753\",\n  \"radius\": 300\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects"]
+            }
+          }
+        },
+
+        {
+          "name": "Update Project",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectname\": \"North Campus Security (Updated)\",\n  \"latitude\": \"24.7140\",\n  \"longitude\": \"46.6760\",\n  \"radius\": 400,\n  \"active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/{{project_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "{{project_guid}}"]
+            }
+          }
+        },
+
+        {
+          "name": "Delete (Deactivate) Project",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/{{project_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "{{project_guid}}"]
+            },
+            "description": "Soft-deletes by setting isactive = false."
+          }
+        },
+
+        {
+          "name": "Assign Staff to Project",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staff_guid\": \"{{staff_guid}}\",\n  \"project_guid\": \"{{project_guid}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/assign",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "assign"]
+            }
+          }
+        },
+
+        {
+          "name": "Remove Staff from Project",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/projects/assign/{{project_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "projects", "assign", "{{project_guid}}"],
+              "description": "Route param is the assignment record GUID (from UserProjectModel)."
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Attendance",
+      "item": [
+
+        {
+          "name": "Check In",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empguid\": \"{{staff_guid}}\",\n  \"date_time\": \"2026-05-05 08:30:00\",\n  \"role_id\": \"{{role_guid}}\",\n  \"project\": \"{{project_guid}}\",\n  \"latitude\": \"24.7136\",\n  \"longitude\": \"46.6753\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/attendance/checkin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "attendance", "checkin"]
+            },
+            "description": "Creates a new check-in record. Enforces role-based project / GPS requirements. Returns 409 if staff is already checked in without a checkout."
+          }
+        },
+
+        {
+          "name": "Check Out",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empguid\": \"{{staff_guid}}\",\n  \"date_time\": \"2026-05-05 17:00:00\",\n  \"role_id\": \"{{role_guid}}\",\n  \"project\": \"{{project_guid}}\",\n  \"latitude\": \"24.7136\",\n  \"longitude\": \"46.6753\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/attendance/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "attendance", "checkout"]
+            },
+            "description": "Closes the open check-in record. Appends worked_hours in the response."
+          }
+        },
+
+        {
+          "name": "Checked-In List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/attendance/checked-in?date=2026-05-05&per_page=25",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "attendance", "checked-in"],
+              "query": [
+                { "key": "date",     "value": "2026-05-05", "description": "Y-m-d (default today)" },
+                { "key": "emp_id",   "value": "",           "description": "Filter by staff GUID", "disabled": true },
+                { "key": "project",  "value": "",           "description": "Filter by project GUID", "disabled": true },
+                { "key": "per_page", "value": "25" },
+                { "key": "page",     "value": "1",          "disabled": true }
+              ]
+            },
+            "description": "All staff who have a checkin record (with or without checkout) for the given date."
+          }
+        },
+
+        {
+          "name": "Checked-Out (Pending Checkout) List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/attendance/checked-out?date=2026-05-05&per_page=25",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "attendance", "checked-out"],
+              "query": [
+                { "key": "date",     "value": "2026-05-05", "description": "Y-m-d (default today)" },
+                { "key": "emp_id",   "value": "",           "description": "Filter by staff GUID", "disabled": true },
+                { "key": "project",  "value": "",           "description": "Filter by project GUID", "disabled": true },
+                { "key": "per_page", "value": "25" }
+              ]
+            },
+            "description": "Staff who checked in but have NOT yet checked out — still inside."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Enrollment",
+      "item": [
+
+        {
+          "name": "Save Face Enrollment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empguid\": \"{{staff_guid}}\",\n  \"createdby\": \"{{staff_guid}}\",\n  \"vector\": \"[0.123, -0.456, 0.789, 0.012, -0.345]\",\n  \"vectors\": \"[[0.123, -0.456, 0.789], [0.111, -0.222, 0.333]]\",\n  \"blob\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/enrollment",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "enrollment"]
+            },
+            "description": "Save or update a single face enrollment. blob must be a base64 data URI (data:image/jpeg;base64,...). Existing enrollment is logged before overwrite."
+          }
+        },
+
+        {
+          "name": "Bulk Save Face Enrollments",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"empguid\": \"{{staff_guid}}\",\n    \"createdby\": \"{{staff_guid}}\",\n    \"vector\": \"[0.123, -0.456, 0.789]\",\n    \"blob\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...\"\n  },\n  {\n    \"empguid\": \"another-staff-guid\",\n    \"createdby\": \"{{staff_guid}}\",\n    \"vector\": \"[0.321, -0.654, 0.987]\",\n    \"blob\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...\"\n  }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/enrollment/bulk",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "enrollment", "bulk"]
+            },
+            "description": "Request body is a JSON array. Returns saved GUIDs and any per-item errors."
+          }
+        },
+
+        {
+          "name": "Remove Face Enrollment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/enrollment/{{staff_guid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "enrollment", "{{staff_guid}}"]
+            },
+            "description": "Route param is the staff GUID (empguid). Logs the old record, deletes the image file, clears profile image."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Vectors",
+      "item": [
+
+        {
+          "name": "Get All Vectors",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/vectors?since=2026-01-01&per_page=100&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "vectors"],
+              "query": [
+                { "key": "since",    "value": "2026-01-01", "description": "Y-m-d — only vectors updated on/after this date" },
+                { "key": "per_page", "value": "100",        "description": "Max 500 per page" },
+                { "key": "page",     "value": "1" },
+                { "key": "no_cache", "value": "0",          "description": "Set to 1 to bypass cache", "disabled": true }
+              ]
+            },
+            "description": "Paginated vector list intended for the Python face-recognition backend. Cached for 30 minutes. Use no_cache=1 to force a fresh read."
+          }
+        },
+
+        {
+          "name": "Get Vector by Staff ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/vectors/EMP001",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "vectors", "EMP001"]
+            },
+            "description": "Route param can be emp_id (e.g. EMP001) or staff GUID. Response includes staff_guid, staff_id, name, image_url, vector, vectors."
+          }
+        },
+
+        {
+          "name": "Invalidate Vector Cache",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staff_id\": \"EMP001\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v2/vectors/invalidate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "vectors", "invalidate"]
+            },
+            "description": "Clears the vector cache. staff_id is optional — omit to invalidate all paged caches. Call this immediately after any enrollment create / update / delete."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Reports",
+      "item": [
+
+        {
+          "name": "Attendance Report (Date)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/reports?date=2026-05-05&per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "reports"],
+              "query": [
+                { "key": "date",           "value": "2026-05-05", "description": "Y-m-d (single day, default today)" },
+                { "key": "from",           "value": "",           "description": "Y-m-d range start (overrides date)", "disabled": true },
+                { "key": "to",             "value": "",           "description": "Y-m-d range end",                    "disabled": true },
+                { "key": "entity",         "value": "",           "description": "Entity ID",                          "disabled": true },
+                { "key": "category",       "value": "",           "description": "Category code",                      "disabled": true },
+                { "key": "classification", "value": "",           "description": "Classification code",                "disabled": true },
+                { "key": "project",        "value": "",           "description": "Project ID or GUID",                 "disabled": true },
+                { "key": "search_emp",     "value": "",           "description": "emp_id partial",                     "disabled": true },
+                { "key": "search_name",    "value": "",           "description": "Name partial",                       "disabled": true },
+                { "key": "per_page",       "value": "25" },
+                { "key": "page",           "value": "1" }
+              ]
+            },
+            "description": "One row per staff member. attendance_status = Present | Checked-In Only | Absent. Includes worked_hours, GPS coords, project name."
+          }
+        },
+
+        {
+          "name": "Attendance Report (Date Range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/reports?from=2026-05-01&to=2026-05-05&per_page=25&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "reports"],
+              "query": [
+                { "key": "from",     "value": "2026-05-01" },
+                { "key": "to",       "value": "2026-05-05" },
+                { "key": "per_page", "value": "25" },
+                { "key": "page",     "value": "1" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Staff Attendance History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/reports/history?emp_id={{staff_guid}}&per_page=25",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "reports", "history"],
+              "query": [
+                { "key": "emp_id",   "value": "{{staff_guid}}", "description": "Staff GUID (required)" },
+                { "key": "date",     "value": "",               "description": "Specific date filter",     "disabled": true },
+                { "key": "from",     "value": "",               "description": "Date range start",         "disabled": true },
+                { "key": "to",       "value": "",               "description": "Date range end",           "disabled": true },
+                { "key": "per_page", "value": "25" }
+              ]
+            },
+            "description": "Returns 5 buckets: all, today, yesterday, last_7_days, last_30_days. Each bucket has pagination metadata."
+          }
+        },
+
+        {
+          "name": "Day Details (Single Staff)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/reports/day-details?emp_id={{staff_guid}}&date=2026-05-05",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "reports", "day-details"],
+              "query": [
+                { "key": "emp_id", "value": "{{staff_guid}}", "description": "Staff GUID (required)" },
+                { "key": "date",   "value": "2026-05-05",     "description": "Y-m-d (required)" }
+              ]
+            },
+            "description": "All individual punch records for a staff member on one day, ordered by checkin time. Includes GPS, project, worked_hours per punch."
+          }
+        },
+
+        {
+          "name": "Attendance Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v2/reports/summary?date=2026-05-05",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v2", "reports", "summary"],
+              "query": [
+                { "key": "date",   "value": "2026-05-05", "description": "Y-m-d (default today)" },
+                { "key": "entity", "value": "",           "description": "Filter by entity ID", "disabled": true }
+              ]
+            },
+            "description": "Quick count summary: total_active, total_enrolled, total_unenrolled, checked_in, checked_out, still_inside, absent."
+          }
+        }
+
+      ]
+    }
+
+  ,
+
+    {
+      "name": "External App",
+      "description": "Separate auth flow for machine-to-machine integrations (e.g. Python face-recognition service).\n\n1. Admin creates a client via 'Create App Client' (uses main JWT).\n2. External app calls 'Get App Token' with client_id + client_secret.\n3. Token is auto-saved to {{app_token}}.\n4. Use {{app_token}} for the App Vectors requests.",
+      "item": [
+
+        {
+          "name": "App Auth",
+          "item": [
+
+            {
+              "name": "Get App Token",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var res = pm.response.json();",
+                      "if (res.data && res.data.access_token) {",
+                      "    pm.collectionVariables.set('app_token', res.data.access_token);",
+                      "    console.log('App token saved:', res.data.access_token);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"client_id\": \"python-face-service\",\n  \"client_secret\": \"your-raw-client-secret-here\",\n  \"ttl_hours\": 24\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/auth/token",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "auth", "token"]
+                },
+                "description": "Exchange client_id + client_secret for a time-limited Bearer token.\nToken is auto-saved to {{app_token}}.\nttl_hours is optional (default 24, max 168)."
+              }
+            }
+
+          ]
+        },
+
+        {
+          "name": "App Vectors",
+          "item": [
+
+            {
+              "name": "Get All Vectors",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [{ "key": "token", "value": "{{app_token}}", "type": "string" }]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/vectors?since=2026-01-01&per_page=100&page=1",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "vectors"],
+                  "query": [
+                    { "key": "since",    "value": "2026-01-01", "description": "Y-m-d — only return vectors updated on/after this date" },
+                    { "key": "per_page", "value": "100",        "description": "Records per page (max 500)" },
+                    { "key": "page",     "value": "1" },
+                    { "key": "no_cache", "value": "0",          "description": "Set to 1 to skip the 30-min cache", "disabled": true }
+                  ]
+                },
+                "description": "Returns staff_guid, staff_id (emp_id), name, image_url, vector, vectors for every enrolled staff member.\nShares the same cache as the internal /vectors endpoint — busted automatically by POST /vectors/invalidate."
+              }
+            },
+
+            {
+              "name": "Get Vector by Staff ID",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [{ "key": "token", "value": "{{app_token}}", "type": "string" }]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/vectors/EMP001",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "vectors", "EMP001"]
+                },
+                "description": "Route param can be emp_id (e.g. EMP001) or the staff GUID.\nReturns 404 if the staff member has no face enrolled."
+              }
+            }
+
+          ]
+        },
+
+        {
+          "name": "App Client Management",
+          "description": "Admin-only endpoints (require main JWT Bearer token, not app token).",
+          "item": [
+
+            {
+              "name": "List App Clients",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/clients",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "clients"]
+                },
+                "description": "Returns all registered external app clients with active-token status and last-used timestamp."
+              }
+            },
+
+            {
+              "name": "Create App Client",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var res = pm.response.json();",
+                      "if (res.data && res.data.uuid) {",
+                      "    pm.collectionVariables.set('app_uuid', res.data.uuid);",
+                      "    console.log('Save this client_secret NOW — it will not be shown again:', res.data.client_secret);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Python Face Service\",\n  \"client_id\": \"python-face-service\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/clients",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "clients"]
+                },
+                "description": "Creates a new app client and returns the raw client_secret ONCE.\nSave it immediately — it is hashed on the server and cannot be retrieved again.\nThe client UUID is auto-saved to {{app_uuid}}."
+              }
+            },
+
+            {
+              "name": "Update App Client",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Python Face Service v2\",\n  \"is_active\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/clients/{{app_uuid}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "clients", "{{app_uuid}}"]
+                }
+              }
+            },
+
+            {
+              "name": "Rotate Client Secret",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/clients/{{app_uuid}}/rotate-secret",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "clients", "{{app_uuid}}", "rotate-secret"]
+                },
+                "description": "Generates a new client_secret and immediately revokes the current access token.\nReturns the new raw secret ONCE — save it now."
+              }
+            },
+
+            {
+              "name": "Delete App Client",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v2/app/clients/{{app_uuid}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v2", "app", "clients", "{{app_uuid}}"]
+                },
+                "description": "Permanently deletes the app client. Any outstanding tokens are immediately invalid."
+              }
+            }
+
+          ]
+        }
+
+      ]
+    }
+
+  ]
+}
