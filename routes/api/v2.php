@@ -11,6 +11,7 @@ use App\Http\Controllers\API\V2\AttendanceReportController;
 use App\Http\Controllers\API\V2\DashboardController;
 use App\Http\Controllers\API\V2\AppAuthController;
 use App\Http\Controllers\API\V2\AppVectorController;
+use App\Http\Controllers\API\V2\TemplateController;
 
 // ─── Public Routes ────────────────────────────────────────────────────────────
 Route::post('auth/login', [AuthController::class, 'login']);
@@ -65,11 +66,17 @@ Route::middleware('check.api.auth')->group(function () {
     Route::get('vectors/{staffId}', [VectorController::class, 'show']);
     Route::post('vectors/invalidate', [VectorController::class, 'invalidateCache']);
 
+    // Import Templates
+    Route::get('templates/employees', [TemplateController::class, 'employees']);
+    Route::get('templates/projects', [TemplateController::class, 'projects']);
+    Route::get('templates/attendance', [TemplateController::class, 'attendance']);
+
     // Attendance Reports
     Route::get('reports', [AttendanceReportController::class, 'index']);
     Route::get('reports/history', [AttendanceReportController::class, 'history']);
     Route::get('reports/day-details', [AttendanceReportController::class, 'dayDetails']);
     Route::get('reports/summary', [AttendanceReportController::class, 'summary']);
+    Route::get('reports/facial-recognition', [AttendanceReportController::class, 'facialRecognition']);
 
     // ── App Client Management (admin only, main JWT) ──────────────────────────
     Route::get('app/clients', [AppAuthController::class, 'listClients']);

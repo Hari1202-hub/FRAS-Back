@@ -48,11 +48,13 @@ class TplUserModel extends Model
     }
     public function Classifications()
     {
-        return $this->hasOne(MasterValueModel::class,  'code', 'classification_code');
+        return $this->hasOne(MasterValueModel::class, 'code', 'classification_code')
+                    ->where('master_key', 'CLASSIFICATION');
     }
     public function Categories()
     {
-        return $this->hasOne(MasterValueModel::class,  'code', 'category_code');
+        return $this->hasOne(MasterValueModel::class, 'code', 'category_code')
+                    ->where('master_key', 'CATEGORY');
     }
     public function Checkin()
     {

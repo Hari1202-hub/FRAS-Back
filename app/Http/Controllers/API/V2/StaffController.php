@@ -36,7 +36,7 @@ class StaffController extends BaseController
      */
     public function index(Request $request)
     {
-        $query = TplUserModel::with(['User', 'Roles', 'Entities', 'Classifications', 'Categories', 'faceEnrolled'])
+        $query = TplUserModel::with(['User', 'Roles', 'Entities', 'Classifications', 'Categories', 'faceEnrolled', 'Project'])
             ->where('id', '<>', 1);
 
         // Generic search across name + emp_id
@@ -87,6 +87,14 @@ class StaffController extends BaseController
             }
         }
 
+        if ($request->has('has_role')) {
+            if ((int) $request->has_role === 1) {
+                $query->whereHas('Roles');
+            } else {
+                $query->whereDoesntHave('Roles');
+            }
+        }
+
         $perPage   = (int) ($request->per_page ?? 25);
         $paginator = $query->orderBy('name', 'asc')->paginate($perPage);
 
@@ -132,7 +140,7 @@ class StaffController extends BaseController
     {
         $perPage = (int) ($request->per_page ?? 25);
 
-        $query = TplUserModel::with(['User', 'Roles', 'Entities', 'faceEnrolled'])
+        $query = TplUserModel::with(['User', 'Roles', 'Entities', 'Classifications', 'Categories', 'faceEnrolled', 'Project'])
             ->where('id', '<>', 1)
             ->where('isactive', true)
             ->whereIn('guid', fn($q) => $q->select('empguid')->from('tbl_entrolled_image'));
@@ -157,7 +165,7 @@ class StaffController extends BaseController
     {
         $perPage = (int) ($request->per_page ?? 25);
 
-        $query = TplUserModel::with(['User', 'Roles', 'Entities'])
+        $query = TplUserModel::with(['User', 'Roles', 'Entities', 'Classifications', 'Categories', 'Project'])
             ->where('id', '<>', 1)
             ->where('isactive', true)
             ->whereNotIn('guid', fn($q) => $q->select('empguid')->from('tbl_entrolled_image'));

@@ -76,36 +76,33 @@ class AttendanceController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $time = date('H:i:s', strtotime($request->date_time));
+        $authUser = Auth::guard('api')->user();
+        $date     = date('Y-m-d', strtotime($request->date_time));
+        $time     = date('H:i:s',  strtotime($request->date_time));
 
         // Cooldown: block if the same employee checked out within the last N seconds.
         $last = CheckinModel::where('emp_id', $request->empguid)
             ->whereNotNull('checkout')
-            ->orderBy('updated_at', 'desc')
-            ->first();
-
-        if ($last && $last->updated_at->diffInSeconds(now()) < self::COOLDOWN_SECONDS) {
-            return $this->error('Please wait a moment before checking out again.', 429);
-        }
-
-        // Close the most recent open check-in — no role or project filter.
-        $record = CheckinModel::where('emp_id', $request->empguid)
-            ->whereNull('checkout')
             ->orderBy('created_at', 'desc')
             ->first();
 
-        if (!$record) {
-            return $this->error('No active check-in found.', 404);
+        if ($last && $last->created_at->diffInSeconds(now()) < self::COOLDOWN_SECONDS) {
+            return $this->error('Please wait a moment before checking out again.', 429);
         }
 
-        $record->checkout            = $time;
-        $record->checkout_project_id = $request->project   ?? '';
-        $record->checkout_lat        = $request->latitude  ?? '';
-        $record->checkout_lang       = $request->longitude ?? '';
-        $record->checkout_image      = $this->saveBlob($request->blob, 'checkout');
+        // Each checkout is a separate entry — same structure as checkin but with checkout time.
+        $record                   = new CheckinModel();
+        $record->guid             = Str::uuid();
+        $record->checkout         = $time;
+        $record->date             = $date;
+        $record->emp_id           = $request->empguid;
+        $record->user_id          = $authUser->user_id;
+        $record->project_id       = $request->project   ?? '';
+        $record->checkout_lat     = $request->latitude  ?? '';
+        $record->checkout_lang    = $request->longitude ?? '';
+        $record->attendance_type  = '';
+        $record->checkout_image   = $this->saveBlob($request->blob, 'checkout');
         $record->save();
-
-        $record->worked_hours = $this->calcWorkedHours($record->checkin, $record->checkout);
 
         return $this->success($record, 'Checked out successfully.', 200, $request, 'attendance/checkout');
     }

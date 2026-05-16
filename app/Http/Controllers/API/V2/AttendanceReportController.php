@@ -48,81 +48,96 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $date    = $request->date ?? date('Y-m-d');
+        $from    = $request->from ?? ($request->date ?? Carbon::now('Asia/Dubai')->format('Y-m-d'));
+        $to      = $request->to   ?? $from;
         $perPage = (int) ($request->per_page ?? 25);
-        $page    = (int) ($request->page ?? 1);
+        $page    = (int) ($request->page    ?? 1);
+
+        // Pre-aggregate attendance rows (checkin + checkout are separate rows)
+        // per (emp_guid × date) so we get first check-in and last check-out correctly.
+        $attSub = DB::table('tbl_user_checin_checkout as c')
+            ->whereRaw("c.date BETWEEN ? AND ?", [$from, $to])
+            ->selectRaw("
+                c.emp_id                                                           AS emp_guid,
+                c.date                                                             AS att_date,
+                MIN(CASE WHEN c.checkin  IS NOT NULL THEN c.project_id END)        AS project_id,
+                MIN(c.checkin)                                                     AS checkin,
+                MAX(c.checkout)                                                    AS checkout,
+                MIN(CASE WHEN c.checkin  IS NOT NULL THEN c.checkin_lat   END)     AS checkin_lat,
+                MIN(CASE WHEN c.checkin  IS NOT NULL THEN c.checkin_lang  END)     AS checkin_lang,
+                MAX(CASE WHEN c.checkout IS NOT NULL THEN c.checkout_lat  END)     AS checkout_lat,
+                MAX(CASE WHEN c.checkout IS NOT NULL THEN c.checkout_lang END)     AS checkout_lang,
+                COALESCE(NULLIF(MAX(CASE WHEN c.checkin IS NOT NULL THEN c.attendance_type END),''),'Regular') AS attendance_type
+            ")
+            ->groupBy('c.emp_id', 'c.date');
 
         $query = DB::table('tbl_user as u')
             ->leftJoin('tbl_userlogin as ul', 'ul.user_id', '=', 'u.id')
-            ->leftJoin('tbl_user_checin_checkout as c', function ($join) use ($request, $date) {
-                $join->on(DB::raw('c.emp_id::text'), '=', DB::raw('u.guid::text'));
-
-                if ($request->filled('from') && $request->filled('to')) {
-                    $join->whereRaw('c.date::date BETWEEN ? AND ?', [$request->from, $request->to]);
-                } else {
-                    $join->whereRaw('c.date::date = ?', [$date]);
-                }
+            ->leftJoinSub($attSub, 'att', DB::raw('att.emp_guid::text'), '=', DB::raw('u.guid::text'))
+            ->leftJoin('tbl_project as p', DB::raw('p.guid::text'), '=', DB::raw('att.project_id::text'))
+            ->leftJoin('tbl_mastervalue as cat', function ($j) {
+                $j->on('cat.code', '=', 'u.category_code')->whereRaw("cat.master_key = 'CATEGORY'");
             })
-            ->leftJoin('tbl_project as p', fn($j) => $j->on(DB::raw('p.id::text'), '=', DB::raw('c.project_id::text')))
-            ->leftJoin('tbl_mastervalue as cat', 'cat.code', '=', 'u.category_code')
-            ->leftJoin('tbl_mastervalue as cls', 'cls.code', '=', 'u.classification_code')
-            ->leftJoin('tbl_entity as e', fn($j) => $j->on(DB::raw('e.id::text'), '=', DB::raw('u.entity_id::text')))
+            ->leftJoin('tbl_mastervalue as cls', function ($j) {
+                $j->on('cls.code', '=', 'u.classification_code')->whereRaw("cls.master_key = 'CLASSIFICATION'");
+            })
+            ->leftJoin('tbl_entity as e', DB::raw('e.id::text'), '=', DB::raw('u.entity_id::text'))
             ->where('u.isactive', true)
             ->where('u.id', '<>', 1);
 
         if ($request->filled('entity') && $request->entity !== 'all') {
             $query->whereRaw('u.entity_id::text = ?', [$request->entity]);
         }
-
         if ($request->filled('category') && $request->category !== 'all') {
             $query->where('u.category_code', $request->category);
         }
-
         if ($request->filled('classification') && $request->classification !== 'all') {
             $query->where('u.classification_code', $request->classification);
         }
-
         if ($request->filled('project') && $request->project !== 'all') {
-            $query->whereRaw('c.project_id::text = ?', [$request->project]);
+            $query->whereRaw('att.project_id::text = ?', [$request->project]);
         }
-
         if ($request->filled('search_emp')) {
             $query->where('ul.emp_id', 'ILIKE', '%' . $request->search_emp . '%');
         }
-
         if ($request->filled('search_name')) {
             $query->where('u.name', 'ILIKE', '%' . $request->search_name . '%');
         }
 
         $query->selectRaw("
-            DISTINCT ON (u.guid)
-            u.guid          AS emp_guid,
-            u.name          AS employee_name,
-            ul.emp_id       AS emp_id,
+            u.guid                 AS emp_guid,
+            u.name                 AS employee_name,
+            ul.emp_id              AS emp_id,
             e.entityname,
-            cat.description AS category,
-            cls.description AS classification,
+            cat.description        AS category,
+            cls.description        AS classification,
+            p.projectid            AS project_code,
             p.projectname,
-            c.date,
-            c.checkin,
-            c.checkout,
-            c.checkin_lat,
-            c.checkin_lang,
-            c.checkout_lat,
-            c.checkout_lang,
+            att.att_date           AS date,
+            att.checkin,
+            att.checkout,
+            att.checkin_lat,
+            att.checkin_lang,
+            att.checkout_lat,
+            att.checkout_lang,
+            att.attendance_type,
             CASE
-                WHEN c.checkout IS NOT NULL
-                THEN TO_CHAR((c.checkout - c.checkin), 'HH24:MI:SS')
+                WHEN att.checkout IS NOT NULL AND att.checkin IS NOT NULL
+                THEN TO_CHAR(
+                    CASE
+                        WHEN att.checkout >= att.checkin
+                        THEN (att.checkout - att.checkin)
+                        ELSE (att.checkout - att.checkin + INTERVAL '24 hours')
+                    END, 'HH24:MI:SS')
                 ELSE NULL
             END AS worked_hours,
             CASE
-                WHEN c.emp_id IS NULL   THEN 'Absent'
-                WHEN c.checkout IS NULL THEN 'Checked-In Only'
+                WHEN att.checkin IS NULL AND att.checkout IS NULL THEN 'Absent'
+                WHEN att.checkout IS NULL                         THEN 'Checked-In Only'
                 ELSE 'Present'
             END AS attendance_status
         ")
-        ->orderBy('u.guid')
-        ->orderBy('c.id', 'desc');
+        ->orderByRaw('u.name ASC, att.att_date ASC');
 
         $reports = $query->paginate($perPage, ['*'], 'page', $page);
 
@@ -221,17 +236,22 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $records = DB::table('tbl_user_checin_checkout')
-            ->where('emp_id', $request->emp_id)
-            ->whereDate('date', $request->date)
-            ->orderBy('checkin', 'asc')
-            ->get([
-                'id', 'checkin', 'checkout',
-                'checkin_lat', 'checkin_lang',
-                'checkout_lat', 'checkout_lang',
-                'project_id', 'attendance_type', 'created_at',
+        $records = DB::table('tbl_user_checin_checkout as c')
+            ->leftJoin('tbl_project as p', DB::raw('p.guid::text'), '=', DB::raw('c.project_id::text'))
+            ->where('c.emp_id', $request->emp_id)
+            ->whereDate('c.date', $request->date)
+            ->orderBy('c.created_at', 'asc')
+            ->select([
+                'c.id', 'c.checkin', 'c.checkout',
+                'c.checkin_lat', 'c.checkin_lang',
+                'c.checkout_lat', 'c.checkout_lang',
+                'c.checkin_image', 'c.checkout_image',
+                'c.attendance_type', 'c.created_at',
+                'p.projectid as project_code', 'p.projectname',
             ])
+            ->get()
             ->map(function ($rec) {
+                $rec->event_type   = $rec->checkin  ? ($rec->checkout ? 'Both' : 'Check-In')  : 'Check-Out';
                 $rec->worked_hours = ($rec->checkin && $rec->checkout)
                     ? $this->calcWorkedHours($rec->checkin, $rec->checkout)
                     : null;
@@ -292,6 +312,156 @@ class AttendanceReportController extends BaseController
             'still_inside'    => max(0, $stillInside),
             'absent'          => max(0, $absent),
         ], 'Attendance summary.', 200, $request, 'reports/summary');
+    }
+
+    /**
+     * Facial Recognition Report.
+     *
+     * Returns one row per (employee × project × date × attendance_type),
+     * with the FIRST check-in and LAST check-out for that group and
+     * duration in decimal hours (rounded to 2 dp).
+     *
+     * Query params:
+     *   from           – Y-m-d  (default today)
+     *   to             – Y-m-d  (default = from)
+     *   entity         – entity id
+     *   project        – project id or guid
+     *   timekeeper     – emp_id partial match
+     *   employee_id    – emp_id partial match
+     *   classification – classification code
+     *   status         – attendance_type value (e.g. Regular, Sick, Official Duty)
+     *   per_page       – default 50
+     *   page           – default 1
+     */
+    public function facialRecognition(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'from'           => 'nullable|date_format:Y-m-d',
+            'to'             => 'nullable|date_format:Y-m-d|after_or_equal:from',
+            'entity'         => 'nullable',
+            'project'        => 'nullable',
+            'timekeeper'     => 'nullable|string',
+            'employee_id'    => 'nullable|string',
+            'classification' => 'nullable|string',
+            'status'         => 'nullable|string',
+            'per_page'       => 'nullable|integer|min:1|max:5000',
+            'page'           => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->validationError($validator->errors()->toArray());
+        }
+
+        $from    = $request->from    ?? Carbon::now('Asia/Dubai')->format('Y-m-d');
+        $to      = $request->to      ?? $from;
+        $perPage = (int) ($request->per_page ?? 50);
+        $page    = (int) ($request->page    ?? 1);
+
+        // ── Level 1: aggregate raw attendance rows per (emp × project × date) ──────
+        // Checkin and checkout are separate rows in the table.
+        // Timekeeper and attendance_type come from the checkin row (where checkin IS NOT NULL).
+        $innerSub = DB::table('tbl_user_checin_checkout as c')
+            ->whereRaw('c.date BETWEEN ? AND ?', [$from, $to])
+            ->selectRaw("
+                c.emp_id,
+                c.project_id,
+                c.date,
+                MIN(c.checkin)  AS first_checkin,
+                MAX(c.checkout) AS last_checkout,
+                MIN(CASE WHEN c.checkin IS NOT NULL THEN c.user_id END) AS timekeeper_user_id,
+                COALESCE(
+                    NULLIF(MAX(CASE WHEN c.checkin IS NOT NULL THEN c.attendance_type END), ''),
+                    'Regular'
+                ) AS status
+            ")
+            ->groupBy('c.emp_id', 'c.project_id', 'c.date');
+
+        // ── Level 2: join dimension tables onto the pre-aggregated result ──────────
+        $q = DB::table(DB::raw("({$innerSub->toSql()}) AS agg"))
+            ->mergeBindings($innerSub)
+            ->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('agg.emp_id::text'))
+            ->join('tbl_userlogin as ul', 'ul.user_id', '=', 'u.id')
+            ->join('tbl_project as p', DB::raw('p.guid::text'), '=', DB::raw('agg.project_id::text'))
+            ->join('tbl_entity as e', DB::raw('e.id::text'), '=', DB::raw('p.entity_id::text'))
+            ->leftJoin('tbl_mastervalue as cls', function ($j) {
+                $j->on('cls.code', '=', 'u.classification_code')
+                  ->whereRaw("cls.master_key = 'CLASSIFICATION'");
+            })
+            ->leftJoin('tbl_user as tk', 'tk.id', '=', 'agg.timekeeper_user_id')
+            ->leftJoin('tbl_userlogin as tk_ul', 'tk_ul.user_id', '=', 'tk.id')
+            ->where('u.isactive', true)
+            ->where('u.id', '<>', 1);
+
+        if ($request->filled('entity') && $request->entity !== 'all') {
+            $q->whereRaw('p.entity_id::text = ?', [$request->entity]);
+        }
+        if ($request->filled('project') && $request->project !== 'all') {
+            $q->whereRaw('(p.id::text = ? OR p.guid::text = ?)', [$request->project, $request->project]);
+        }
+        if ($request->filled('timekeeper')) {
+            $q->where('tk_ul.emp_id', 'ILIKE', '%' . $request->timekeeper . '%');
+        }
+        if ($request->filled('employee_id')) {
+            $q->where('ul.emp_id', 'ILIKE', '%' . $request->employee_id . '%');
+        }
+        if ($request->filled('classification') && $request->classification !== 'all') {
+            $q->where('u.classification_code', $request->classification);
+        }
+        if ($request->filled('status') && $request->status !== 'all') {
+            $q->where('agg.status', $request->status);
+        }
+
+        $q->selectRaw("
+            e.entityname,
+            p.projectid                        AS project_code,
+            p.projectname,
+            COALESCE(tk_ul.emp_id, '')         AS timekeeper_id,
+            COALESCE(tk.name, '')              AS timekeeper_name,
+            ul.emp_id                          AS employee_id,
+            u.name                             AS employee_name,
+            u.guid                             AS emp_guid,
+            COALESCE(cls.description, '')      AS classification,
+            agg.date                           AS report_date,
+            agg.first_checkin,
+            agg.last_checkout,
+            CASE
+                WHEN agg.last_checkout IS NOT NULL AND agg.first_checkin IS NOT NULL
+                THEN ROUND(
+                    CAST(
+                        EXTRACT(EPOCH FROM (
+                            CASE
+                                WHEN agg.last_checkout >= agg.first_checkin
+                                THEN (agg.last_checkout - agg.first_checkin)
+                                ELSE (agg.last_checkout - agg.first_checkin + INTERVAL '24 hours')
+                            END
+                        )) / 3600.0
+                    AS NUMERIC), 2)
+                ELSE NULL
+            END AS duration_hours,
+            agg.status
+        ")
+        ->orderByRaw('agg.date ASC, e.entityname ASC, p.projectname ASC, ul.emp_id ASC');
+
+        // GROUP BY queries need a wrapper subquery for accurate pagination count
+        $total = DB::table(DB::raw("({$q->toSql()}) AS fr_sub"))
+            ->mergeBindings($q)
+            ->count();
+
+        $items   = (clone $q)->skip(($page - 1) * $perPage)->take($perPage)->get();
+        $lastPage = $total > 0 ? (int) ceil($total / $perPage) : 1;
+
+        return response()->json([
+            'success' => true,
+            'status'  => 200,
+            'message' => 'Facial recognition report fetched.',
+            'data'    => $items,
+            'meta'    => [
+                'current_page' => $page,
+                'last_page'    => max(1, $lastPage),
+                'per_page'     => $perPage,
+                'total'        => $total,
+            ],
+        ]);
     }
 
     // ─── Private helpers ───────────────────────────────────────────────────────

@@ -21,8 +21,9 @@ class AuthController extends BaseController
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'email'    => 'required',
-            'password' => 'required',
+            'email'       => 'required',
+            'password'    => 'required',
+            'client_type' => 'nullable|string|in:mobile,web',
         ]);
 
         if ($validator->fails()) {
@@ -32,6 +33,11 @@ class AuthController extends BaseController
         $credentials = filter_var($request->email, FILTER_VALIDATE_EMAIL)
             ? ['email' => $request->email, 'password' => $request->password]
             : ['emp_id' => $request->email, 'password' => $request->password];
+
+        // Mobile clients get a 7-day token; web uses the default from config (JWT_TTL).
+        if ($request->input('client_type') === 'mobile') {
+            auth()->factory()->setTTL(60 * 24 * 7); // 10080 minutes = 7 days
+        }
 
         if (!$token = JWTAuth::attempt($credentials)) {
             return $this->error('Invalid credentials.', 401);
