@@ -240,7 +240,7 @@ class AttendanceReportController extends BaseController
             ->leftJoin('tbl_project as p', DB::raw('p.guid::text'), '=', DB::raw('c.project_id::text'))
             ->where('c.emp_id', $request->emp_id)
             ->whereDate('c.date', $request->date)
-            ->orderBy('c.created_at', 'asc')
+            ->orderByRaw('COALESCE(c.checkin, c.checkout) ASC, c.created_at ASC')
             ->select([
                 'c.id', 'c.checkin', 'c.checkout',
                 'c.checkin_lat', 'c.checkin_lang',

@@ -29,9 +29,8 @@ class AttendanceController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $authUser = Auth::guard('api')->user();
-        $date     = date('Y-m-d', strtotime($request->date_time));
-        $time     = date('H:i:s',  strtotime($request->date_time));
+        $authUser       = Auth::guard('api')->user();
+        [$date, $time]  = $this->parseDateTimeToDubai($request->date_time, $request->timezone);
 
         // Cooldown: block if the same employee checked in within the last N seconds.
         $last = CheckinModel::where('emp_id', $request->empguid)
@@ -49,9 +48,9 @@ class AttendanceController extends BaseController
         $record->date            = $date;
         $record->emp_id          = $request->empguid;
         $record->user_id         = $authUser->user_id;
-        $record->project_id      = $request->project   ?? '';
-        $record->checkin_lat     = $request->latitude  ?? '';
-        $record->checkin_lang    = $request->longitude ?? '';
+        $record->project_id      = $request->project  ?? '';
+        $record->checkin_lat     = $request->filled('latitude')  ? $request->latitude  : null;
+        $record->checkin_lang    = $request->filled('longitude') ? $request->longitude : null;
         $record->attendance_type = '';
         $record->checkin_image   = $this->saveBlob($request->blob, 'checkin');
         $record->save();
@@ -76,9 +75,8 @@ class AttendanceController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $authUser = Auth::guard('api')->user();
-        $date     = date('Y-m-d', strtotime($request->date_time));
-        $time     = date('H:i:s',  strtotime($request->date_time));
+        $authUser       = Auth::guard('api')->user();
+        [$date, $time]  = $this->parseDateTimeToDubai($request->date_time, $request->timezone);
 
         // Cooldown: block if the same employee checked out within the last N seconds.
         $last = CheckinModel::where('emp_id', $request->empguid)
@@ -97,9 +95,9 @@ class AttendanceController extends BaseController
         $record->date             = $date;
         $record->emp_id           = $request->empguid;
         $record->user_id          = $authUser->user_id;
-        $record->project_id       = $request->project   ?? '';
-        $record->checkout_lat     = $request->latitude  ?? '';
-        $record->checkout_lang    = $request->longitude ?? '';
+        $record->project_id       = $request->project  ?? '';
+        $record->checkout_lat     = $request->filled('latitude')  ? $request->latitude  : null;
+        $record->checkout_lang    = $request->filled('longitude') ? $request->longitude : null;
         $record->attendance_type  = '';
         $record->checkout_image   = $this->saveBlob($request->blob, 'checkout');
         $record->save();
@@ -171,11 +169,40 @@ class AttendanceController extends BaseController
         return Validator::make($request->all(), [
             'empguid'   => 'required|string',
             'date_time' => 'required|date_format:Y-m-d H:i:s',
+            'timezone'  => 'nullable|string|timezone',
             'project'   => 'nullable|string',
             'latitude'  => 'nullable|numeric',
             'longitude' => 'nullable|numeric',
             'blob'      => 'nullable|string',
         ]);
+    }
+
+    /**
+     * Parse a naive "Y-m-d H:i:s" string as the given IANA timezone,
+     * then return [date, time] converted to Asia/Dubai (UTC+4).
+     *
+     * If no timezone is supplied the server default (Asia/Dubai) is used,
+     * so the value is stored unchanged — this preserves backward-compat
+     * for clients that already send Dubai-local time.
+     */
+    private function parseDateTimeToDubai(string $dateTimeStr, ?string $clientTz): array
+    {
+        try {
+            $sourceTz = new \DateTimeZone($clientTz ?: 'Asia/Dubai');
+        } catch (\Exception $e) {
+            $sourceTz = new \DateTimeZone('Asia/Dubai');
+        }
+
+        $dt = \DateTime::createFromFormat('Y-m-d H:i:s', $dateTimeStr, $sourceTz);
+
+        if (!$dt) {
+            // Fallback: plain strtotime in server timezone
+            return [date('Y-m-d', strtotime($dateTimeStr)), date('H:i:s', strtotime($dateTimeStr))];
+        }
+
+        $dt->setTimezone(new \DateTimeZone('Asia/Dubai'));
+
+        return [$dt->format('Y-m-d'), $dt->format('H:i:s')];
     }
 
     /**
