@@ -41,10 +41,10 @@ class StaffController extends BaseController
 
         // Generic search across name + emp_id
         if ($request->filled('search')) {
-            $term  = $request->search;
+            $term = $request->search;
             $query->where(function ($q) use ($term) {
                 $q->where('name', 'ilike', "%{$term}%")
-                  ->orWhereHas('User', fn($u) => $u->where('emp_id', 'ilike', "%{$term}%"));
+                    ->orWhereHas('User', fn($u) => $u->where('emp_id', 'ilike', "%{$term}%"));
             });
         }
 
@@ -63,7 +63,7 @@ class StaffController extends BaseController
         if ($request->filled('entity')) {
             $query->where(function ($q) use ($request) {
                 $q->where('entity_id', $request->entity)
-                  ->orWhereHas('Entities', fn($e) => $e->where('guid', $request->entity));
+                    ->orWhereHas('Entities', fn($e) => $e->where('guid', $request->entity));
             });
         }
 
@@ -95,11 +95,11 @@ class StaffController extends BaseController
             }
         }
 
-        $perPage   = (int) ($request->per_page ?? 25);
+        $perPage = (int) ($request->per_page ?? 25);
         $paginator = $query->orderBy('name', 'asc')->paginate($perPage);
 
         $paginator->getCollection()->transform(function ($item) {
-            $item->image       = $this->resolveImage($item);
+            $item->image = $this->resolveImage($item);
             $item->is_enrolled = !empty($item->faceEnrolled);
             return $item;
         });
@@ -110,22 +110,23 @@ class StaffController extends BaseController
     /**
      * GET /api/v2/staff/all
      *
-     * Returns all active staff as a flat list (guid, name, emp_id).
-     * Cached for 30 minutes — designed for dropdown population with 5 K+ records.
-     * Cache is automatically busted when staff are created/updated elsewhere.
+     * Lightweight list of all active staff — no pagination, for dropdowns / sync.
+     * Cached for 30 minutes. Cache is busted on every staff store operation.
      */
     public function listAll()
     {
         $data = Cache::remember('staff_all_active_dropdown', 1800, function () {
-            return TplUserModel::with('User')
-                ->where('isactive', true)
+            return TplUserModel::with(['User', 'faceEnrolled'])
                 ->where('id', '<>', 1)
-                ->orderBy('name')
+                ->where('isactive', true)
+                ->orderBy('name', 'asc')
                 ->get()
-                ->map(fn($s) => [
-                    'guid'   => $s->guid,
-                    'name'   => $s->name ?? '',
-                    'emp_id' => $s->User?->emp_id ?? '',
+                ->map(fn($item) => [
+                    'guid'        => $item->guid,
+                    'name'        => $item->name ?? '',
+                    'emp_id'      => optional($item->User)->emp_id ?? '',
+                    'is_enrolled' => !empty($item->faceEnrolled),
+                    'image'       => $this->resolveImage($item),
                 ])
                 ->values();
         });
@@ -150,7 +151,7 @@ class StaffController extends BaseController
         $paginator = $query->orderBy('name', 'asc')->paginate($perPage);
 
         $paginator->getCollection()->transform(function ($item) {
-            $item->image       = $this->resolveImage($item);
+            $item->image = $this->resolveImage($item);
             $item->is_enrolled = true;
             return $item;
         });
@@ -175,7 +176,7 @@ class StaffController extends BaseController
         $paginator = $query->orderBy('name', 'asc')->paginate($perPage);
 
         $paginator->getCollection()->transform(function ($item) {
-            $item->image       = $this->resolveImage($item);
+            $item->image = $this->resolveImage($item);
             $item->is_enrolled = false;
             return $item;
         });
@@ -196,7 +197,7 @@ class StaffController extends BaseController
             return $this->notFound('Staff member not found.');
         }
 
-        $staff->image       = $this->resolveImage($staff);
+        $staff->image = $this->resolveImage($staff);
         $staff->is_enrolled = !empty($staff->faceEnrolled);
 
         return $this->success($staff, 'Staff details fetched.');
@@ -209,7 +210,7 @@ class StaffController extends BaseController
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'employees'   => 'required|array|min:1',
+            'employees' => 'required|array|min:1',
             'employees.*' => 'array',
         ]);
 
@@ -218,23 +219,27 @@ class StaffController extends BaseController
         }
 
         $inserted = [];
-        $updated  = [];
-        $skipped  = [];
+        $updated = [];
+        $skipped = [];
+
+        // Hash once — reused for every new employee's default password.
+        // Avoids N × bcrypt calls inside the loop which causes timeout on large imports.
+        $defaultPasswordHash = Hash::make('123456');
 
         DB::beginTransaction();
 
         try {
             foreach ($request->employees as $index => $emp) {
                 $rowValidator = Validator::make($emp, [
-                    'id'             => 'required|string|max:50',
-                    'name'           => 'required|string|max:100',
-                    'entity'         => 'required|string',
+                    'id' => 'required|string|max:50',
+                    'name' => 'required|string|max:100',
+                    'entity' => 'required|string',
                     'classification' => 'required|string',
-                    'category'       => 'required|string',
-                    'email'          => 'nullable|email',
-                    'mobile'         => 'nullable',
-                    'status'         => 'required',
-                    'reference_id'   => 'required|string',
+                    'category' => 'required|string',
+                    'email' => 'nullable|email',
+                    'mobile' => 'nullable',
+                    'status' => 'required',
+                    'reference_id' => 'required|string',
                 ]);
 
                 if ($rowValidator->fails()) {
@@ -242,12 +247,12 @@ class StaffController extends BaseController
                     continue;
                 }
 
-                $entity         = $this->firstOrCreateEntity($emp['entity']);
-                $categoryCode   = $this->firstOrCreateMasterCode('CATEGORY', $emp['category']);
-                $classCode      = $this->firstOrCreateMasterCode('CLASSIFICATION', $emp['classification']);
-                $isActive       = strtolower($emp['status']) === 'active';
-                $email          = !empty($emp['email']) ? strtolower(trim($emp['email'])) : null;
-                $mobile         = !empty($emp['mobile']) ? trim($emp['mobile']) : null;
+                $entity = $this->firstOrCreateEntity($emp['entity']);
+                $categoryCode = $this->firstOrCreateMasterCode('CATEGORY', $emp['category']);
+                $classCode = $this->firstOrCreateMasterCode('CLASSIFICATION', $emp['classification']);
+                $isActive = strtolower($emp['status']) === 'active';
+                $email = !empty($emp['email']) ? strtolower(trim($emp['email'])) : null;
+                $mobile = !empty($emp['mobile']) ? trim($emp['mobile']) : null;
 
                 $existing = TplUserModel::where('unique_id', $emp['reference_id'])->first();
 
@@ -262,56 +267,80 @@ class StaffController extends BaseController
                     ->when($existing, fn($q) => $q->where('user_id', '!=', optional($existing)->id))
                     ->exists();
 
-                if ($emailTaken || $empIdTaken) {
-                    $skipped[] = ['row' => $index + 1, 'reason' => 'Duplicate email or employee ID'];
+                // Hard stop — duplicate employee ID is unresolvable
+                if ($empIdTaken) {
+                    $skipped[] = [
+                        'emp_id' => $emp['id'] ?? '',
+                        'email'  => $emp['email'] ?? '',
+                        'name'   => $emp['name'] ?? '',
+                        'row'    => $index + 1,
+                        'reason' => 'Duplicate employee ID',
+                    ];
                     continue;
                 }
 
+                // Soft conflict — generate a unique email so the record can still be saved
+                $emailRemark = null;
+                if ($emailTaken && $email) {
+                    [$localPart, $domain] = explode('@', $email, 2);
+                    $counter = 1;
+                    do {
+                        $candidate  = $localPart . '_' . $counter . '@' . $domain;
+                        $stillTaken = TplUserModel::where('email', $candidate)
+                            ->when($existing, fn($q) => $q->where('id', '!=', optional($existing)->id))
+                            ->exists();
+                        $counter++;
+                    } while ($stillTaken && $counter <= 100);
+
+                    $email       = $candidate;
+                    $emailRemark = "Original email already in use — assigned: {$email}";
+                }
+
                 if (!$existing) {
-                    $user                      = new TplUserModel();
-                    $user->guid                = Str::uuid();
-                    $user->unique_id           = $emp['reference_id'];
-                    $user->name                = $emp['name'];
-                    $user->email               = $email;
-                    $user->mobile              = $mobile;
-                    $user->category_code       = $categoryCode;
+                    $user = new TplUserModel();
+                    $user->guid = Str::uuid();
+                    $user->unique_id = $emp['reference_id'];
+                    $user->name = $emp['name'];
+                    $user->email = $email;
+                    $user->mobile = $mobile;
+                    $user->category_code = $categoryCode;
                     $user->classification_code = $classCode;
-                    $user->entity_id           = $entity->id;
-                    $user->loginmethod_code    = $email ? 'email' : 'Employee Id';
-                    $user->isactive            = $isActive;
+                    $user->entity_id = $entity->id;
+                    $user->loginmethod_code = $email ? 'email' : 'Employee Id';
+                    $user->isactive = $isActive;
                     $user->save();
 
-                    $login                  = new User();
-                    $login->guid            = $user->guid;
-                    $login->email           = $email ?? $emp['id'];
-                    $login->user_id         = $user->id;
-                    $login->emp_id          = $emp['id'];
-                    $login->password        = bcrypt('123456');
-                    $login->passcode        = 'TEST';
+                    $login = new User();
+                    $login->guid = $user->guid;
+                    $login->email = $email ?? $emp['id'];
+                    $login->user_id = $user->id;
+                    $login->emp_id = $emp['id'];
+                    $login->password = $defaultPasswordHash;
+                    $login->passcode = 'TEST';
                     $login->defaultpassword = 1;
-                    $login->isactive        = $isActive;
+                    $login->isactive = $isActive;
                     $login->save();
 
-                    $inserted[] = ['emp_id' => $emp['id'], 'name' => $emp['name']];
+                    $inserted[] = ['emp_id' => $emp['id'], 'name' => $emp['name'], 'remark' => $emailRemark];
                 } else {
-                    $existing->name                = $emp['name'];
-                    $existing->email               = $email ?? $existing->email;
-                    $existing->mobile              = $mobile ?? $existing->mobile;
-                    $existing->category_code       = $categoryCode;
+                    $existing->name = $emp['name'];
+                    $existing->email = $email ?? $existing->email;
+                    $existing->mobile = $mobile ?? $existing->mobile;
+                    $existing->category_code = $categoryCode;
                     $existing->classification_code = $classCode;
-                    $existing->entity_id           = $entity->id;
-                    $existing->isactive            = $isActive;
+                    $existing->entity_id = $entity->id;
+                    $existing->isactive = $isActive;
                     $existing->save();
 
                     $login = User::where('user_id', $existing->id)->first();
                     if ($login) {
-                        $login->email    = $email ?? $login->email;
-                        $login->emp_id   = $emp['id'];
+                        $login->email = $email ?? $login->email;
+                        $login->emp_id = $emp['id'];
                         $login->isactive = $isActive;
                         $login->save();
                     }
 
-                    $updated[] = ['emp_id' => $emp['id'], 'name' => $emp['name']];
+                    $updated[] = ['emp_id' => $emp['id'], 'name' => $emp['name'], 'remark' => $emailRemark];
                 }
             }
 
@@ -322,12 +351,12 @@ class StaffController extends BaseController
         }
 
         return $this->success([
-            'inserted'         => count($inserted),
-            'updated'          => count($updated),
-            'skipped'          => count($skipped),
+            'inserted' => count($inserted),
+            'updated' => count($updated),
+            'skipped' => count($skipped),
             'inserted_records' => $inserted,
-            'updated_records'  => $updated,
-            'skipped_records'  => $skipped,
+            'updated_records' => $updated,
+            'skipped_records' => $skipped,
         ], 'Staff processed successfully.', 200, $request, 'staff/store');
     }
 
@@ -338,8 +367,8 @@ class StaffController extends BaseController
     public function assignRole(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'guid'    => 'required|string',
-            'roles'   => 'required|array|min:1',
+            'guid' => 'required|string',
+            'roles' => 'required|array|min:1',
             'roles.*' => 'required|string',
             'password' => 'nullable|string|min:6',
         ]);
@@ -385,14 +414,14 @@ class StaffController extends BaseController
             $term = $request->search;
             $query->where(function ($q) use ($term) {
                 $q->where('name', 'ilike', "%{$term}%")
-                  ->orWhereHas('User', fn($u) => $u->where('emp_id', 'ilike', "%{$term}%"));
+                    ->orWhereHas('User', fn($u) => $u->where('emp_id', 'ilike', "%{$term}%"));
             });
         }
 
         if ($request->filled('entity')) {
             $query->where(function ($q) use ($request) {
                 $q->where('entity_id', $request->entity)
-                  ->orWhereHas('Entities', fn($e) => $e->where('guid', $request->entity));
+                    ->orWhereHas('Entities', fn($e) => $e->where('guid', $request->entity));
             });
         }
 
@@ -414,10 +443,10 @@ class StaffController extends BaseController
         $entity = EntityModel::whereRaw('LOWER(entityname) = ?', [strtolower(trim($name))])->first();
 
         if (!$entity) {
-            $entity             = new EntityModel();
-            $entity->guid       = Str::uuid();
+            $entity = new EntityModel();
+            $entity->guid = Str::uuid();
             $entity->entityname = trim($name);
-            $entity->isactive   = true;
+            $entity->isactive = true;
             $entity->save();
         }
 
@@ -448,18 +477,19 @@ class StaffController extends BaseController
         $next = ($lastNum ?? 0) + 1;
 
         do {
-            $newCode   = $prefix . str_pad($next, 3, '0', STR_PAD_LEFT);
-            $taken     = DB::table('tbl_mastervalue')->where('master_key', $type)->where('code', $newCode)->exists();
-            if ($taken) $next++;
+            $newCode = $prefix . str_pad($next, 3, '0', STR_PAD_LEFT);
+            $taken = DB::table('tbl_mastervalue')->where('master_key', $type)->where('code', $newCode)->exists();
+            if ($taken)
+                $next++;
         } while ($taken);
 
         DB::table('tbl_mastervalue')->insert([
-            'master_key'  => $type,
-            'guid'        => Str::uuid(),
-            'code'        => $newCode,
+            'master_key' => $type,
+            'guid' => Str::uuid(),
+            'code' => $newCode,
             'description' => $description,
-            'isactive'    => true,
-            'created_at'  => now(),
+            'isactive' => true,
+            'created_at' => now(),
         ]);
 
         return $newCode;
