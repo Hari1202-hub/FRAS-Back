@@ -31,49 +31,71 @@ class DashboardController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $date      = $request->date ?? date('Y-m-d');
-        $yesterday = Carbon::yesterday()->toDateString();
-        $weekStart = Carbon::today()->subDays(6)->toDateString();
-        $monthStart= Carbon::today()->subDays(29)->toDateString();
+        $ctx        = $this->authContext();
+        $entityId   = $ctx['entity_id']; // null = super admin (no restriction)
+
+        $date       = $request->date ?? date('Y-m-d');
+        $yesterday  = Carbon::yesterday()->toDateString();
+        $weekStart  = Carbon::today()->subDays(6)->toDateString();
+        $monthStart = Carbon::today()->subDays(29)->toDateString();
 
         // ── Staff counts ──────────────────────────────────────────────────────
-        $totalActive    = TplUserModel::where('isactive', true)->where('id', '<>', 1)->count();
-        $totalEnrolled  = DB::table('tbl_entrolled_image')->count();
+        $staffQ = TplUserModel::where('isactive', true)->where('id', '<>', 1);
+        if ($entityId) $staffQ->where('entity_id', $entityId);
+        $totalActive = $staffQ->count();
+
+        $enrollQ = DB::table('tbl_entrolled_image as ei')
+            ->join('tbl_user as u', 'u.guid', '=', 'ei.empguid');
+        if ($entityId) $enrollQ->where('u.entity_id', $entityId);
+        $totalEnrolled   = $enrollQ->count();
         $totalUnenrolled = max(0, $totalActive - $totalEnrolled);
 
         // ── Check-in / Check-out counts for selected date ──────────────────────
-        $checkedInToday  = $this->distinctCheckins($date, 'checkin');
-        $checkedOutToday = $this->distinctCheckins($date, 'checkout');
+        $checkedInToday  = $this->distinctCheckins($date, 'checkin',  $entityId);
+        $checkedOutToday = $this->distinctCheckins($date, 'checkout', $entityId);
         $stillInside     = max(0, $checkedInToday - $checkedOutToday);
         $absent          = max(0, $totalActive - $checkedInToday);
 
         // ── Trends: last 7 days per-day breakdown ─────────────────────────────
-        $trend = $this->getDailyTrend($weekStart, $date);
+        $trend = $this->getDailyTrend($weekStart, $date, $entityId);
 
         // ── Project-based check-in breakdown for selected date ─────────────────
-        $projectBreakdown = $this->getProjectBreakdown($date, $request->entity);
+        $effectiveEntity = $entityId ?? $request->entity;
+        $projectBreakdown = $this->getProjectBreakdown($date, $effectiveEntity);
 
         // ── New enrollments this week / month ─────────────────────────────────
-        $enrolledThisWeek  = DB::table('tbl_entrolled_image')
-            ->whereDate('created_at', '>=', $weekStart)
-            ->count();
-        $enrolledThisMonth = DB::table('tbl_entrolled_image')
-            ->whereDate('created_at', '>=', $monthStart)
-            ->count();
+        $weekEnrollQ  = DB::table('tbl_entrolled_image as ei')
+            ->join('tbl_user as u', 'u.guid', '=', 'ei.empguid')
+            ->whereDate('ei.created_at', '>=', $weekStart);
+        $monthEnrollQ = DB::table('tbl_entrolled_image as ei')
+            ->join('tbl_user as u', 'u.guid', '=', 'ei.empguid')
+            ->whereDate('ei.created_at', '>=', $monthStart);
+        if ($entityId) {
+            $weekEnrollQ->where('u.entity_id', $entityId);
+            $monthEnrollQ->where('u.entity_id', $entityId);
+        }
+        $enrolledThisWeek  = $weekEnrollQ->count();
+        $enrolledThisMonth = $monthEnrollQ->count();
 
         // ── Top projects by check-ins today ───────────────────────────────────
-        $topProjects = DB::table('tbl_user_checin_checkout as c')
+        $topQ = DB::table('tbl_user_checin_checkout as c')
             ->leftJoin('tbl_project as p', DB::raw('p.id::text'), '=', DB::raw('c.project_id::text'))
             ->whereDate('c.date', $date)
-            ->whereNotNull('c.checkin')
-            ->selectRaw("p.projectname, COUNT(DISTINCT c.emp_id) AS checkin_count")
+            ->whereNotNull('c.checkin');
+        if ($entityId) {
+            $topQ->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('c.emp_id::text'))
+                 ->where('u.entity_id', $entityId);
+        }
+        $topProjects = $topQ->selectRaw("p.projectname, COUNT(DISTINCT c.emp_id) AS checkin_count")
             ->groupBy('p.projectname')
             ->orderByDesc('checkin_count')
             ->limit(5)
             ->get();
 
         // ── Active projects count ─────────────────────────────────────────────
-        $totalProjects = ProjectModel::where('isactive', true)->count();
+        $projQ = ProjectModel::where('isactive', true);
+        if ($entityId) $projQ->where('entity_id', $entityId);
+        $totalProjects = $projQ->count();
 
         return $this->success([
             'date' => $date,
@@ -105,26 +127,37 @@ class DashboardController extends BaseController
 
     // ─── Private helpers ───────────────────────────────────────────────────────
 
-    private function distinctCheckins(string $date, string $column): int
+    private function distinctCheckins(string $date, string $column, $entityId = null): int
     {
-        return DB::table('tbl_user_checin_checkout')
-            ->whereDate('date', $date)
-            ->whereNotNull($column)
-            ->distinct('emp_id')
-            ->count('emp_id');
+        $q = DB::table('tbl_user_checin_checkout as c')
+            ->whereDate('c.date', $date)
+            ->whereNotNull("c.{$column}");
+
+        if ($entityId) {
+            $q->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('c.emp_id::text'))
+              ->where('u.entity_id', $entityId);
+        }
+
+        return $q->distinct('c.emp_id')->count('c.emp_id');
     }
 
-    private function getDailyTrend(string $from, string $to): array
+    private function getDailyTrend(string $from, string $to, $entityId = null): array
     {
-        $rows = DB::table('tbl_user_checin_checkout')
-            ->whereBetween(DB::raw('date::date'), [$from, $to])
-            ->selectRaw("
-                date::date AS day,
-                COUNT(DISTINCT emp_id) FILTER (WHERE checkin IS NOT NULL)  AS checked_in,
-                COUNT(DISTINCT emp_id) FILTER (WHERE checkout IS NOT NULL) AS checked_out
+        $q = DB::table('tbl_user_checin_checkout as c')
+            ->whereBetween(DB::raw('c.date::date'), [$from, $to]);
+
+        if ($entityId) {
+            $q->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('c.emp_id::text'))
+              ->where('u.entity_id', $entityId);
+        }
+
+        $rows = $q->selectRaw("
+                c.date::date AS day,
+                COUNT(DISTINCT c.emp_id) FILTER (WHERE c.checkin IS NOT NULL)  AS checked_in,
+                COUNT(DISTINCT c.emp_id) FILTER (WHERE c.checkout IS NOT NULL) AS checked_out
             ")
-            ->groupBy(DB::raw('date::date'))
-            ->orderBy(DB::raw('date::date'))
+            ->groupBy(DB::raw('c.date::date'))
+            ->orderBy(DB::raw('c.date::date'))
             ->get();
 
         return $rows->map(fn($r) => [
