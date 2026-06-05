@@ -92,9 +92,12 @@ export function TanseeqImportModal({
 
   const handleImport = () => {
     if (fetchedEmployees) {
-      const selectedRecords = fetchedEmployees.filter(emp => 
-        selectedEmployees.has(emp.id)
-      );
+      const selectedRecords = fetchedEmployees
+        .filter(emp => selectedEmployees.has(emp.id))
+        .map(emp => ({
+          ...emp,
+          status: emp.status?.trim() ? emp.status : 'Active',
+        }));
       onImportComplete(selectedRecords);
       toast({
         title: "Import Successful",
@@ -349,13 +352,18 @@ export function TanseeqImportModal({
                             <td className="px-4 py-3">{employee.classification}</td>
                             <td className="px-4 py-3">{employee.category}</td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-1 rounded-full text-xs ${
-                                employee.status === "Active" 
-                                  ? "bg-green-100 text-green-800" 
-                                  : "bg-red-100 text-red-800"
-                              }`}>
-                                {employee.status}
-                              </span>
+                              {(() => {
+                                const status = employee.status?.trim() ? employee.status : 'Active';
+                                return (
+                                  <span className={`px-2 py-1 rounded-full text-xs ${
+                                    status === "Active"
+                                      ? "bg-green-100 text-green-800"
+                                      : "bg-red-100 text-red-800"
+                                  }`}>
+                                    {status}
+                                  </span>
+                                );
+                              })()}
                             </td>
                           </tr>
                         ))
