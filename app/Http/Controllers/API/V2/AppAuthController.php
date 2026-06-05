@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use App\Models\AppClientModel;
+use App\Models\AppAccessLog;
 
 class AppAuthController extends BaseController
 {
@@ -195,5 +196,52 @@ class AppAuthController extends BaseController
         $client->delete();
 
         return $this->success([], 'App client deleted.');
+    }
+
+    // =========================================================================
+    // PROTECTED — App access logs
+    // =========================================================================
+
+    /**
+     * GET /api/v2/app/logs
+     *
+     * Paginated access log for all app-token requests.
+     *
+     * Query params:
+     *   client_id – filter by client_id string
+     *   from      – Y-m-d start date
+     *   to        – Y-m-d end date
+     *   per_page  – default 50
+     */
+    public function listLogs(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'from'     => 'nullable|date_format:Y-m-d',
+            'to'       => 'nullable|date_format:Y-m-d',
+            'per_page' => 'nullable|integer|min:1|max:200',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->validationError($validator->errors()->toArray());
+        }
+
+        $query = AppAccessLog::orderBy('created_at', 'desc');
+
+        if ($request->filled('client_id')) {
+            $query->where('client_id', $request->client_id);
+        }
+
+        if ($request->filled('from')) {
+            $query->whereDate('created_at', '>=', $request->from);
+        }
+
+        if ($request->filled('to')) {
+            $query->whereDate('created_at', '<=', $request->to);
+        }
+
+        $perPage   = (int) ($request->per_page ?? 50);
+        $paginator = $query->paginate($perPage);
+
+        return $this->paginated($paginator, 'App access logs fetched.');
     }
 }
