@@ -12,27 +12,37 @@ use App\Http\Controllers\API\V2\DashboardController;
 use App\Http\Controllers\API\V2\AppAuthController;
 use App\Http\Controllers\API\V2\AppVectorController;
 use App\Http\Controllers\API\V2\TemplateController;
+use App\Http\Controllers\API\V2\EntityController;
 
 // ─── Public Routes ────────────────────────────────────────────────────────────
 Route::post('auth/login', [AuthController::class, 'login']);
 Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
+// Refresh accepts an expired JWT — must be outside the auth middleware
+Route::post('auth/refresh', [AuthController::class, 'refresh']);
 
 // ─── Protected Routes ─────────────────────────────────────────────────────────
 Route::middleware('check.api.auth')->group(function () {
 
     // Auth
     Route::post('auth/logout', [AuthController::class, 'logout']);
-    Route::post('auth/refresh', [AuthController::class, 'refresh']);
     Route::get('auth/me', [AuthController::class, 'me']);
 
     // Dashboard
     Route::get('dashboard', [DashboardController::class, 'index']);
 
+    // Entities
+    Route::get('entities', [EntityController::class, 'index']);
+    Route::post('entities', [EntityController::class, 'store']);
+    Route::post('entities/import', [EntityController::class, 'import']);
+    Route::get('entities/{guid}', [EntityController::class, 'show']);
+    Route::put('entities/{guid}', [EntityController::class, 'update']);
+    Route::delete('entities/{guid}', [EntityController::class, 'destroy']);
+
     // Staff
     Route::get('staff', [StaffController::class, 'index']);
     Route::post('staff', [StaffController::class, 'store']);
-    Route::get('staff/all', [StaffController::class, 'listAll']);
+    Route::get('staff/all', [StaffController::class, 'listAll']);  // lightweight list for dropdowns
     Route::get('staff/enrolled', [StaffController::class, 'enrolled']);
     Route::get('staff/unenrolled', [StaffController::class, 'unenrolled']);
     Route::get('staff/{guid}', [StaffController::class, 'show']);
@@ -70,6 +80,7 @@ Route::middleware('check.api.auth')->group(function () {
     Route::get('templates/employees', [TemplateController::class, 'employees']);
     Route::get('templates/projects', [TemplateController::class, 'projects']);
     Route::get('templates/attendance', [TemplateController::class, 'attendance']);
+    Route::get('templates/entities', [TemplateController::class, 'entities']);
 
     // Attendance Reports
     Route::get('reports', [AttendanceReportController::class, 'index']);
@@ -84,12 +95,15 @@ Route::middleware('check.api.auth')->group(function () {
     Route::put('app/clients/{uuid}', [AppAuthController::class, 'updateClient']);
     Route::post('app/clients/{uuid}/rotate-secret', [AppAuthController::class, 'rotateSecret']);
     Route::delete('app/clients/{uuid}', [AppAuthController::class, 'deleteClient']);
+
+    // ── App Access Logs (admin only, main JWT) ────────────────────────────────
+    Route::get('app/logs', [AppAuthController::class, 'listLogs']);
 });
 
 // ─── External App Routes (App Token auth) ────────────────────────────────────
 Route::post('app/auth/token', [AppAuthController::class, 'token']);   // public — exchange credentials
 
-// Route::middleware('check.app.token')->group(function () {
-Route::get('app/vectors', [AppVectorController::class, 'index']);
-Route::get('app/vectors/{staffId}', [AppVectorController::class, 'show']);
-// });
+Route::middleware('check.app.token')->group(function () {
+    Route::get('app/vectors', [AppVectorController::class, 'index']);
+    Route::get('app/vectors/{staffId}', [AppVectorController::class, 'show']);
+});
