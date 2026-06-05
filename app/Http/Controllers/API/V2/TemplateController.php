@@ -51,6 +51,19 @@ class TemplateController extends BaseController
         return $writer->download('projects_import_template.xlsx');
     }
 
+    public function entities()
+    {
+        $writer = new XlsxWriter();
+
+        $writer->addSheet(
+            'Entities',
+            ['Entity Code', 'Entity Name'],
+            [['ENT001', 'Sample Entity Name']]
+        );
+
+        return $writer->download('entities_import_template.xlsx');
+    }
+
     public function attendance()
     {
         $headers = ['Employee_ID', 'Project_ID', 'Date_dd_mm_yyyy', 'Check_In_24hours_format', 'Check_Out_24hours_format', 'Attendance_Type'];
