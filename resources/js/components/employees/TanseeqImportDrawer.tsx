@@ -60,7 +60,6 @@ export function TanseeqImportDrawer({
       const selectedRecords = fetchedEmployees
         .filter(emp => selectedEmployees.includes(emp.id))
         .map(emp => {
-          // Automatically assign roles based on classification
           let assignedRole = null;
           if (emp.classification === "Laborer") {
             assignedRole = "Labour";
@@ -70,8 +69,8 @@ export function TanseeqImportDrawer({
 
           return {
             ...emp,
-            // If there's an assigned role based on classification, set it
-            role: assignedRole || emp.role
+            role: assignedRole || emp.role,
+            status: emp.status?.trim() ? emp.status : 'Active',
           };
         });
 
