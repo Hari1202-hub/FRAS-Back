@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Home, Settings, Users, Calendar, FileText, User, ChevronDown, ChevronRight, ChevronLeft, Briefcase, CheckCircle, Tag, Menu, X, LogOut, Clock, UserCog } from "lucide-react";
+import { Home, Settings, Users, Calendar, FileText, User, ChevronDown, ChevronRight, ChevronLeft, Briefcase, CheckCircle, Tag, Menu, X, LogOut, Clock, UserCog, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,7 +16,7 @@ import { TOKEN } from "../../app";
 // Mock function to get current user permissions - in a real app, this would come from an auth context
 const getUserPermissions = () => {
   // For testing, return Super Admin permissions
-  return [ "View Reports", "Manage Employees", "Manage Projects", "Manage Locations", "Export Reports", "Face Enroll", "Manage Roles", "Role Mapping", "Manage Users", "Attendance Role Logic"];
+  return [ "View Reports", "Manage Employees", "Manage Projects", "Manage Locations", "Export Reports", "Face Enroll", "Manage Roles", "Role Mapping", "Manage Users", "Attendance Role Logic", "Manage App Clients"];
 };
 
 type SubMenuItem = {
@@ -70,6 +70,11 @@ const menuItems: MenuItem[] = [{
     path: "/master/role-attendance-logic",
     icon: <Settings className="h-4 w-4" />,
     requiredPermission: "Attendance Role Logic"
+  }, {
+    name: "App Clients",
+    path: "/master/app-clients",
+    icon: <ShieldCheck className="h-4 w-4" />,
+    requiredPermission: "Manage App Clients"
   }]
 }, /* {
   name: "Manual Attendance",
