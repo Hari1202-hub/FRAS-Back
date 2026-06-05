@@ -25,7 +25,11 @@ class ProjectController extends BaseController
             ->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
-            $query->where('projectname', 'ilike', '%' . $request->search . '%');
+            $term = '%' . $request->search . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('projectname', 'ilike', $term)
+                  ->orWhere('projectid', 'ilike', $term);
+            });
         }
 
         if ($request->filled('entity')) {
@@ -34,6 +38,10 @@ class ProjectController extends BaseController
 
         if ($request->filled('active')) {
             $query->where('isactive', (bool) $request->active);
+        }
+
+        if ($request->boolean('all')) {
+            return $this->success($query->get(), 'Projects fetched.');
         }
 
         $perPage   = (int) ($request->per_page ?? 25);
@@ -119,11 +127,17 @@ class ProjectController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
+        $entityId = $this->resolveEntityId($request->entity_id);
+
+        if ($request->filled('entity_id') && $entityId === null) {
+            return $this->error('Entity not found for the provided entity_id.', 422);
+        }
+
         $project                    = new ProjectModel();
         $project->guid              = Str::uuid();
         $project->projectid         = $request->projectid;
         $project->projectname       = $request->projectname;
-        $project->entity_id         = $request->entity_id;
+        $project->entity_id         = $entityId;
         $project->location_shotname = $request->location_shotname ?? '';
         $project->location_longname = $request->location_longname ?? '';
         $project->isactive          = true;
@@ -180,7 +194,13 @@ class ProjectController extends BaseController
         }
 
         if ($request->filled('projectname'))       $project->projectname       = $request->projectname;
-        if ($request->filled('entity_id'))         $project->entity_id         = $request->entity_id;
+        if ($request->filled('entity_id')) {
+            $entityId = $this->resolveEntityId($request->entity_id);
+            if ($entityId === null) {
+                return $this->error('Entity not found for the provided entity_id.', 422);
+            }
+            $project->entity_id = $entityId;
+        }
         if ($request->filled('location_shotname')) $project->location_shotname = $request->location_shotname;
         if ($request->filled('location_longname')) $project->location_longname = $request->location_longname;
         if ($request->has('active'))               $project->isactive          = (bool) $request->active;
@@ -323,6 +343,35 @@ class ProjectController extends BaseController
      * Each project's entire timekeeper list is replaced atomically.
      * Multiple timekeepers per project are supported via the staff_guids array.
      */
+    /**
+     * Accept entity_id as either a UUID (guid) or an integer (id).
+     * Returns the integer id, or null if not found / not provided.
+     */
+    private function resolveEntityId(mixed $value): ?int
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        // Already an integer id
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        // Entity code first (e.g. ENT001) — checked before UUID so codes take priority
+        $byCode = EntityModel::whereRaw('UPPER(entity_code) = UPPER(?)', [$value])->value('id');
+        if ($byCode !== null) {
+            return $byCode;
+        }
+
+        // UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $value)) {
+            return EntityModel::where('guid', $value)->value('id');
+        }
+
+        return null;
+    }
+
     public function bulkAssignTimekeeper(Request $request)
     {
         $validator = Validator::make($request->all(), [
