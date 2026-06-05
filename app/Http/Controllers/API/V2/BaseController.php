@@ -72,6 +72,29 @@ abstract class BaseController extends Controller
         return $this->error($message, 404);
     }
 
+    /**
+     * Returns auth context for the current request.
+     * is_super_admin = true  → no entity restriction
+     * entity_id              → scope all queries to this entity (BIGINT)
+     * emp_guid               → tbl_user.guid of the logged-in employee
+     */
+    protected function authContext(): array
+    {
+        $login = auth('api')->user();
+
+        if (!$login || $login->user_id == 0) {
+            return ['is_super_admin' => true, 'entity_id' => null, 'emp_guid' => null];
+        }
+
+        $profile = TplUserModel::find($login->user_id);
+
+        return [
+            'is_super_admin' => false,
+            'entity_id'      => $profile?->entity_id,
+            'emp_guid'       => $profile?->guid,
+        ];
+    }
+
     protected function resolveImage(TplUserModel $staff): ?string
     {
         $path = $staff->image ?? optional($staff->faceEnrolled)->image ?? null;
