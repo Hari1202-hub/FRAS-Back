@@ -24,6 +24,7 @@ import Roles from "./pages/master/Roles";
 import Projects from "./Component_master/pages/Projects";
 import AttendanceType from "./Component_master/pages/AttendanceType";
 import RoleAttendanceLogic from "./Component_master/pages/RoleAttendanceLogic";
+import AppClients from "./Component_master/pages/AppClients";
 
 // Reports microservice imports
 import Reports from "./Component_report/pages/Reports";
@@ -90,6 +91,11 @@ const App = () => {
             <Route path="/master/role-attendance-logic" element={
               <PermissionGuard requiredPermission="Attendance Role Logic">
                 <Layout><RoleAttendanceLogic /></Layout>
+              </PermissionGuard>
+            } />
+            <Route path="/master/app-clients" element={
+              <PermissionGuard requiredPermission="Manage App Clients">
+                <Layout><AppClients /></Layout>
               </PermissionGuard>
             } />
             <Route path="*" element={<NotFound />} />
