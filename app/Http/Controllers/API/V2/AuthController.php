@@ -112,7 +112,18 @@ class AuthController extends BaseController
         if ($loginUser->user_id == 0) {
             $adminRole = RoleModel::where('rolecode', 'SUP')->first();
 
-            return $this->error('This ID is only for web end.', 403);
+            return $this->success([
+                'id'              => null,
+                'name'            => 'Super Admin',
+                'email'           => $loginUser->email,
+                'emp_id'          => $loginUser->emp_id,
+                'is_admin'        => true,
+                'image'           => null,
+                'entities'        => null,
+                'classifications' => null,
+                'categories'      => null,
+                'roles'           => $adminRole ? [$adminRole] : [],
+            ], 'Profile fetched.', 200, $request, 'auth/me');
         }
 
         $profile = TplUserModel::with(['User', 'Roles', 'Entities', 'Classifications', 'Categories', 'faceEnrolled'])->find($loginUser->user_id);
