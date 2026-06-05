@@ -4,14 +4,22 @@ namespace App\Http\Controllers\API\V2;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use App\Models\CheckinModel;
+use App\Models\TplUserModel;
+use App\Models\RolesAttendanceLogicModel;
 
 class AttendanceController extends BaseController
 {
     private const COOLDOWN_SECONDS = 10;
+
+    /** Timezone all attendance times are stored in (UAE). */
+    private const STORE_TIMEZONE = 'Asia/Dubai';
 
     // =========================================================================
     // CHECK-IN
@@ -29,8 +37,23 @@ class AttendanceController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $authUser       = Auth::guard('api')->user();
-        [$date, $time]  = $this->parseDateTimeToDubai($request->date_time, $request->timezone);
+        $authUser      = Auth::guard('api')->user();
+        [$date, $time] = $this->parseDateTimeToDubai($request->date_time, $request->timezone, $request);
+
+        // Resolve role attendance logic:
+        // Priority 1 — role_id explicitly passed in the request body
+        // Priority 2 — logged-in performing user's own role(s)
+        $logic          = $this->resolveRoleLogic($request->role_id ? (string) $request->role_id : null, $authUser->user_id);
+        $attendanceType = $logic?->AttendanceTypes?->attendance_type ?? '';
+
+        if ($logic) {
+            if ($logic->project_required && empty($request->project)) {
+                return $this->error('Project is required for check-in based on the role configuration.', 422);
+            }
+            if ($logic->location_required && (!$request->filled('latitude') || !$request->filled('longitude'))) {
+                return $this->error('Location (latitude & longitude) is required for check-in based on the role configuration.', 422);
+            }
+        }
 
         // Cooldown: block if the same employee checked in within the last N seconds.
         $last = CheckinModel::where('emp_id', $request->empguid)
@@ -48,10 +71,10 @@ class AttendanceController extends BaseController
         $record->date            = $date;
         $record->emp_id          = $request->empguid;
         $record->user_id         = $authUser->user_id;
-        $record->project_id      = $request->project  ?? '';
+        $record->project_id      = $request->project ?? '';
         $record->checkin_lat     = $request->filled('latitude')  ? $request->latitude  : null;
         $record->checkin_lang    = $request->filled('longitude') ? $request->longitude : null;
-        $record->attendance_type = '';
+        $record->attendance_type = $attendanceType;
         $record->checkin_image   = $this->saveBlob($request->blob, 'checkin');
         $record->save();
 
@@ -66,7 +89,6 @@ class AttendanceController extends BaseController
      * POST /api/v2/attendance/checkout
      *
      * Body: empguid, date_time (Y-m-d H:i:s), project?, latitude?, longitude?, blob?
-     * Closes the most recent open check-in for the employee (any project / role).
      */
     public function checkOut(Request $request)
     {
@@ -75,8 +97,21 @@ class AttendanceController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $authUser       = Auth::guard('api')->user();
-        [$date, $time]  = $this->parseDateTimeToDubai($request->date_time, $request->timezone);
+        $authUser      = Auth::guard('api')->user();
+        [$date, $time] = $this->parseDateTimeToDubai($request->date_time, $request->timezone, $request);
+
+        // Resolve role attendance logic — same priority as check-in
+        $logic          = $this->resolveRoleLogic($request->role_id ? (string) $request->role_id : null, $authUser->user_id);
+        $attendanceType = $logic?->AttendanceTypes?->attendance_type ?? '';
+
+        if ($logic) {
+            if ($logic->project_required && empty($request->project)) {
+                return $this->error('Project is required for check-out based on the role configuration.', 422);
+            }
+            if ($logic->location_required && (!$request->filled('latitude') || !$request->filled('longitude'))) {
+                return $this->error('Location (latitude & longitude) is required for check-out based on the role configuration.', 422);
+            }
+        }
 
         // Cooldown: block if the same employee checked out within the last N seconds.
         $last = CheckinModel::where('emp_id', $request->empguid)
@@ -88,18 +123,17 @@ class AttendanceController extends BaseController
             return $this->error('Please wait a moment before checking out again.', 429);
         }
 
-        // Each checkout is a separate entry — same structure as checkin but with checkout time.
-        $record                   = new CheckinModel();
-        $record->guid             = Str::uuid();
-        $record->checkout         = $time;
-        $record->date             = $date;
-        $record->emp_id           = $request->empguid;
-        $record->user_id          = $authUser->user_id;
-        $record->project_id       = $request->project  ?? '';
-        $record->checkout_lat     = $request->filled('latitude')  ? $request->latitude  : null;
-        $record->checkout_lang    = $request->filled('longitude') ? $request->longitude : null;
-        $record->attendance_type  = '';
-        $record->checkout_image   = $this->saveBlob($request->blob, 'checkout');
+        $record                  = new CheckinModel();
+        $record->guid            = Str::uuid();
+        $record->checkout        = $time;
+        $record->date            = $date;
+        $record->emp_id          = $request->empguid;
+        $record->user_id         = $authUser->user_id;
+        $record->project_id      = $request->project ?? '';
+        $record->checkout_lat    = $request->filled('latitude')  ? $request->latitude  : null;
+        $record->checkout_lang   = $request->filled('longitude') ? $request->longitude : null;
+        $record->attendance_type = $attendanceType;
+        $record->checkout_image  = $this->saveBlob($request->blob, 'checkout');
         $record->save();
 
         return $this->success($record, 'Checked out successfully.', 200, $request, 'attendance/checkout');
@@ -169,7 +203,11 @@ class AttendanceController extends BaseController
         return Validator::make($request->all(), [
             'empguid'   => 'required|string',
             'date_time' => 'required|date_format:Y-m-d H:i:s',
-            'timezone'  => 'nullable|string|timezone',
+            // NOTE: intentionally not using the strict `timezone` rule. An unknown
+            // or misspelled id (e.g. "Asia/Kolkatha") must NOT reject the request;
+            // it is normalized / safely handled in parseDateTimeToDubai().
+            'timezone'  => 'nullable|string',
+            'role_id'   => 'nullable|string',
             'project'   => 'nullable|string',
             'latitude'  => 'nullable|numeric',
             'longitude' => 'nullable|numeric',
@@ -178,31 +216,96 @@ class AttendanceController extends BaseController
     }
 
     /**
-     * Parse a naive "Y-m-d H:i:s" string as the given IANA timezone,
-     * then return [date, time] converted to Asia/Dubai (UTC+4).
+     * Parse a naive "Y-m-d H:i:s" string into the device's source timezone,
+     * then forcefully convert it to Asia/Dubai (UAE) and return [date, time].
      *
-     * If no timezone is supplied the server default (Asia/Dubai) is used,
-     * so the value is stored unchanged — this preserves backward-compat
-     * for clients that already send Dubai-local time.
+     * Source timezone resolution order:
+     *   1. The `timezone` field in the request body (if valid).
+     *   2. The timezone of the device's IP address (geo lookup).
+     *   3. Asia/Dubai — the value is stored unchanged.
      */
-    private function parseDateTimeToDubai(string $dateTimeStr, ?string $clientTz): array
+    private function parseDateTimeToDubai(string $dateTimeStr, ?string $clientTz, Request $request): array
     {
-        try {
-            $sourceTz = new \DateTimeZone($clientTz ?: 'Asia/Dubai');
-        } catch (\Exception $e) {
-            $sourceTz = new \DateTimeZone('Asia/Dubai');
-        }
+        $targetTz = new \DateTimeZone(self::STORE_TIMEZONE);
+
+        // 1. Body timezone first, 2. fall back to IP-derived timezone,
+        // 3. finally treat the wall-clock time as already being UAE time.
+        $sourceTz = $this->resolveTimezone($clientTz)
+            ?: $this->timezoneFromIp($request->ip())
+            ?: $targetTz;
 
         $dt = \DateTime::createFromFormat('Y-m-d H:i:s', $dateTimeStr, $sourceTz);
 
         if (!$dt) {
-            // Fallback: plain strtotime in server timezone
-            return [date('Y-m-d', strtotime($dateTimeStr)), date('H:i:s', strtotime($dateTimeStr))];
+            // Fallback: parse leniently in the source timezone.
+            try {
+                $dt = new \DateTime($dateTimeStr, $sourceTz);
+            } catch (\Exception $e) {
+                $dt = new \DateTime('now', $targetTz);
+            }
         }
 
-        $dt->setTimezone(new \DateTimeZone('Asia/Dubai'));
+        // Always store in UAE timezone, regardless of where it was captured.
+        $dt->setTimezone($targetTz);
 
         return [$dt->format('Y-m-d'), $dt->format('H:i:s')];
+    }
+
+    /**
+     * Turn a timezone id string into a valid DateTimeZone, or null if it is
+     * empty / not a real IANA id. Never throws.
+     */
+    private function resolveTimezone(?string $tz): ?\DateTimeZone
+    {
+        if ($tz === null || trim($tz) === '') {
+            return null;
+        }
+
+        $tz = trim($tz);
+
+        // Verify against the real IANA list so bad ids never reach the
+        // DateTimeZone constructor (which would throw "invalid timezone id").
+        if (!in_array($tz, \DateTimeZone::listIdentifiers(), true)) {
+            return null;
+        }
+
+        try {
+            return new \DateTimeZone($tz);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolve the timezone of a device from its IP address using a geo lookup.
+     * Result is cached per-IP for a day. Returns null for private/reserved IPs
+     * or when the lookup fails. Never throws.
+     */
+    private function timezoneFromIp(?string $ip): ?\DateTimeZone
+    {
+        // No public geo data exists for missing / private / reserved addresses
+        // (e.g. localhost, 192.168.x, 10.x), so skip the lookup entirely.
+        if (!$ip || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return null;
+        }
+
+        $tzId = Cache::remember("ip_timezone:{$ip}", now()->addDay(), function () use ($ip) {
+            try {
+                $resp = Http::timeout(3)->get("http://ip-api.com/json/{$ip}", [
+                    'fields' => 'status,timezone',
+                ]);
+
+                if ($resp->ok() && $resp->json('status') === 'success') {
+                    return $resp->json('timezone'); // e.g. "Asia/Kolkata"
+                }
+            } catch (\Throwable $e) {
+                Log::warning('IP timezone lookup failed', ['ip' => $ip, 'error' => $e->getMessage()]);
+            }
+
+            return null;
+        });
+
+        return $this->resolveTimezone($tzId);
     }
 
     /**
@@ -250,6 +353,52 @@ class AttendanceController extends BaseController
         } catch (\Exception $e) {
             return '';
         }
+    }
+
+    /**
+     * Resolve the role attendance logic to apply for this attendance action.
+     *
+     * Priority:
+     *   1. role_id explicitly passed in the request — direct lookup on tbl_role_attendance_logic.
+     *   2. Logged-in performing user's own roles (first role that has a logic entry).
+     *
+     * The employee being checked in is NOT used — the timekeeper/admin performing
+     * the attendance drives which rules apply.
+     */
+    private function resolveRoleLogic(?string $roleId, int $performingUserId): ?RolesAttendanceLogicModel
+    {
+        // Priority 1: explicit role_id from request — accepts integer id or UUID guid
+        if ($roleId) {
+            $query = RolesAttendanceLogicModel::with('AttendanceTypes');
+
+            if (is_numeric($roleId)) {
+                $query->where('role_id', (int) $roleId);
+            } else {
+                // UUID guid — join through tbl_role to resolve
+                $query->whereHas('Roles', fn($q) => $q->where('guid', $roleId));
+            }
+
+            $logic = $query->first();
+            if ($logic) {
+                return $logic;
+            }
+        }
+
+        // Priority 2: performing user's own assigned roles
+        $performer = TplUserModel::with(['Roles.AttendanceLogic.AttendanceTypes'])
+            ->find($performingUserId);
+
+        if (!$performer) {
+            return null;
+        }
+
+        foreach ($performer->Roles as $role) {
+            if ($role->AttendanceLogic) {
+                return $role->AttendanceLogic;
+            }
+        }
+
+        return null;
     }
 
     /**
