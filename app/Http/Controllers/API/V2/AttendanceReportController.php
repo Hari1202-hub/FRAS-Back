@@ -48,6 +48,7 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
+        $ctx     = $this->authContext();
         $from    = $request->from ?? ($request->date ?? Carbon::now('Asia/Dubai')->format('Y-m-d'));
         $to      = $request->to   ?? $from;
         $perPage = (int) ($request->per_page ?? 25);
@@ -85,8 +86,13 @@ class AttendanceReportController extends BaseController
             ->where('u.isactive', true)
             ->where('u.id', '<>', 1);
 
-        if ($request->filled('entity') && $request->entity !== 'all') {
-            $query->whereRaw('u.entity_id::text = ?', [$request->entity]);
+        // Entity scoping: non-admins are locked to their own entity
+        $effectiveEntity = $ctx['is_super_admin']
+            ? ($request->filled('entity') && $request->entity !== 'all' ? $request->entity : null)
+            : $ctx['entity_id'];
+
+        if ($effectiveEntity) {
+            $query->where('u.entity_id', $effectiveEntity);
         }
         if ($request->filled('category') && $request->category !== 'all') {
             $query->where('u.category_code', $request->category);
@@ -179,8 +185,17 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
+        $ctx  = $this->authContext();
         $user = User::where('guid', $request->emp_id)->first();
         if (!$user) return $this->notFound('Staff member not found.');
+
+        // Non-admins can only view history for employees in their own entity
+        if (!$ctx['is_super_admin']) {
+            $requestedProfile = TplUserModel::find($user->user_id);
+            if (!$requestedProfile || (string) $requestedProfile->entity_id !== (string) $ctx['entity_id']) {
+                return $this->error('Access denied: employee does not belong to your entity.', 403);
+            }
+        }
 
         $perPage   = (int) ($request->per_page ?? 25);
         $transform = fn($rec) => $this->appendWorkedHours($rec);
@@ -281,23 +296,34 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
-        $date = $request->date ?? date('Y-m-d');
+        $ctx      = $this->authContext();
+        $entityId = $ctx['entity_id'];
+        $date     = $request->date ?? date('Y-m-d');
 
-        $totalActive = TplUserModel::where('isactive', true)->where('id', '<>', 1)->count();
-        $totalEnrolled = DB::table('tbl_entrolled_image')->count();
+        $staffQ = TplUserModel::where('isactive', true)->where('id', '<>', 1);
+        if ($entityId) $staffQ->where('entity_id', $entityId);
+        $totalActive = $staffQ->count();
+
+        $enrollQ = DB::table('tbl_entrolled_image as ei')
+            ->join('tbl_user as u', 'u.guid', '=', 'ei.empguid');
+        if ($entityId) $enrollQ->where('u.entity_id', $entityId);
+        $totalEnrolled   = $enrollQ->count();
         $totalUnenrolled = $totalActive - $totalEnrolled;
 
-        $checkedIn = DB::table('tbl_user_checin_checkout as c')
-            ->whereDate('c.date', $date)
-            ->whereNotNull('c.checkin')
-            ->distinct('c.emp_id')
-            ->count('c.emp_id');
+        $ciQ = DB::table('tbl_user_checin_checkout as c')
+            ->whereDate('c.date', $date)->whereNotNull('c.checkin');
+        $coQ = DB::table('tbl_user_checin_checkout as c')
+            ->whereDate('c.date', $date)->whereNotNull('c.checkout');
 
-        $checkedOut = DB::table('tbl_user_checin_checkout as c')
-            ->whereDate('c.date', $date)
-            ->whereNotNull('c.checkout')
-            ->distinct('c.emp_id')
-            ->count('c.emp_id');
+        if ($entityId) {
+            $ciQ->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('c.emp_id::text'))
+                ->where('u.entity_id', $entityId);
+            $coQ->join('tbl_user as u', DB::raw('u.guid::text'), '=', DB::raw('c.emp_id::text'))
+                ->where('u.entity_id', $entityId);
+        }
+
+        $checkedIn  = $ciQ->distinct('c.emp_id')->count('c.emp_id');
+        $checkedOut = $coQ->distinct('c.emp_id')->count('c.emp_id');
 
         $absent      = $totalActive - $checkedIn;
         $stillInside = $checkedIn - $checkedOut;
@@ -352,6 +378,7 @@ class AttendanceReportController extends BaseController
             return $this->validationError($validator->errors()->toArray());
         }
 
+        $ctx     = $this->authContext();
         $from    = $request->from    ?? Carbon::now('Asia/Dubai')->format('Y-m-d');
         $to      = $request->to      ?? $from;
         $perPage = (int) ($request->per_page ?? 50);
@@ -392,8 +419,13 @@ class AttendanceReportController extends BaseController
             ->where('u.isactive', true)
             ->where('u.id', '<>', 1);
 
-        if ($request->filled('entity') && $request->entity !== 'all') {
-            $q->whereRaw('p.entity_id::text = ?', [$request->entity]);
+        // Entity scoping: non-admins locked to their own entity
+        $effectiveEntity = $ctx['is_super_admin']
+            ? ($request->filled('entity') && $request->entity !== 'all' ? $request->entity : null)
+            : $ctx['entity_id'];
+
+        if ($effectiveEntity) {
+            $q->where('p.entity_id', $effectiveEntity);
         }
         if ($request->filled('project') && $request->project !== 'all') {
             $q->whereRaw('(p.id::text = ? OR p.guid::text = ?)', [$request->project, $request->project]);
