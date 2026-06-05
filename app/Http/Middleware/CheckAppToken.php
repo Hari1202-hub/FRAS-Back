@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use App\Models\AppClientModel;
+use App\Models\AppAccessLog;
 
 class CheckAppToken
 {
@@ -28,11 +29,26 @@ class CheckAppToken
             return $this->deny('Token has expired. Request a new token via POST /api/v2/app/auth/token');
         }
 
-        // Stamp last_used_at (no need to fail the request if this errors)
+        // Stamp last_used_at
         $client->timestamps = false;
         $client->last_used_at = now();
         $client->save();
         $client->timestamps = true;
+
+        // Write access log — never block the request on failure
+        try {
+            AppAccessLog::create([
+                'client_id'       => $client->client_id,
+                'client_name'     => $client->name,
+                'endpoint'        => $request->path(),
+                'method'          => $request->method(),
+                'ip_address'      => $request->ip(),
+                'user_agent'      => substr((string) $request->userAgent(), 0, 500),
+                'response_status' => 200,
+            ]);
+        } catch (\Throwable) {
+            // Logging failure must never block the request
+        }
 
         // Attach client to request for use in controllers if needed
         $request->attributes->set('app_client', $client);
