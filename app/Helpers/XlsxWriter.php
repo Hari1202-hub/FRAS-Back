@@ -32,18 +32,15 @@ class XlsxWriter
 
     private function writeToFile(string $path): void
     {
-        $zip = new \ZipArchive();
-        $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
-
         $sheetCount = count($this->sheets);
+        $files = [];
 
-        // [Content_Types].xml
         $sheetOverrides = '';
         for ($i = 1; $i <= $sheetCount; $i++) {
             $sheetOverrides .= '<Override PartName="/xl/worksheets/sheet' . $i . '.xml"'
                 . ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
         }
-        $zip->addFromString('[Content_Types].xml',
+        $files['[Content_Types].xml'] =
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
             . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -51,33 +48,27 @@ class XlsxWriter
             . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
             . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
             . $sheetOverrides
-            . '</Types>'
-        );
+            . '</Types>';
 
-        // _rels/.rels
-        $zip->addFromString('_rels/.rels',
+        $files['_rels/.rels'] =
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-            . '</Relationships>'
-        );
+            . '</Relationships>';
 
-        // xl/workbook.xml
         $sheetElements = '';
         foreach ($this->sheets as $idx => $sheet) {
             $num  = $idx + 1;
             $name = $this->xmlAttr($sheet['name']);
             $sheetElements .= "<sheet name=\"{$name}\" sheetId=\"{$num}\" r:id=\"rId{$num}\"/>";
         }
-        $zip->addFromString('xl/workbook.xml',
+        $files['xl/workbook.xml'] =
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
             . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             . '<sheets>' . $sheetElements . '</sheets>'
-            . '</workbook>'
-        );
+            . '</workbook>';
 
-        // xl/_rels/workbook.xml.rels
         $wbRels = '';
         foreach ($this->sheets as $idx => $sheet) {
             $num     = $idx + 1;
@@ -89,15 +80,13 @@ class XlsxWriter
         $wbRels  .= '<Relationship Id="rId' . $stylesId . '"'
             . ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"'
             . ' Target="styles.xml"/>';
-        $zip->addFromString('xl/_rels/workbook.xml.rels',
+        $files['xl/_rels/workbook.xml.rels'] =
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             . $wbRels
-            . '</Relationships>'
-        );
+            . '</Relationships>';
 
-        // xl/styles.xml — two cell styles: normal (index 0) and bold (index 1)
-        $zip->addFromString('xl/styles.xml',
+        $files['xl/styles.xml'] =
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<fonts count="2">'
@@ -114,19 +103,77 @@ class XlsxWriter
             . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
             . '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>'
             . '</cellXfs>'
-            . '</styleSheet>'
-        );
+            . '</styleSheet>';
 
-        // xl/worksheets/sheetN.xml
         foreach ($this->sheets as $idx => $sheet) {
             $num = $idx + 1;
-            $zip->addFromString(
-                "xl/worksheets/sheet{$num}.xml",
-                $this->buildSheet($sheet['headers'], $sheet['rows'])
-            );
+            $files["xl/worksheets/sheet{$num}.xml"] = $this->buildSheet($sheet['headers'], $sheet['rows']);
         }
 
-        $zip->close();
+        file_put_contents($path, $this->buildZip($files));
+    }
+
+    private function buildZip(array $files): string
+    {
+        $localParts = '';
+        $centralDir = '';
+        $offset     = 0;
+
+        foreach ($files as $name => $content) {
+            $crc     = \crc32($content);
+            $size    = \strlen($content);
+            $nameLen = \strlen($name);
+
+            $local = pack('V', 0x04034b50)  // local file header signature
+                . pack('v', 20)              // version needed to extract
+                . pack('v', 0)               // general purpose bit flag
+                . pack('v', 0)               // compression method (stored)
+                . pack('v', 0)               // last mod file time
+                . pack('v', 0)               // last mod file date
+                . pack('V', $crc)            // crc-32
+                . pack('V', $size)           // compressed size
+                . pack('V', $size)           // uncompressed size
+                . pack('v', $nameLen)        // file name length
+                . pack('v', 0)               // extra field length
+                . $name
+                . $content;
+
+            $centralDir .= pack('V', 0x02014b50)  // central file header signature
+                . pack('v', 20)                    // version made by
+                . pack('v', 20)                    // version needed to extract
+                . pack('v', 0)                     // general purpose bit flag
+                . pack('v', 0)                     // compression method
+                . pack('v', 0)                     // last mod file time
+                . pack('v', 0)                     // last mod file date
+                . pack('V', $crc)                  // crc-32
+                . pack('V', $size)                 // compressed size
+                . pack('V', $size)                 // uncompressed size
+                . pack('v', $nameLen)              // file name length
+                . pack('v', 0)                     // extra field length
+                . pack('v', 0)                     // file comment length
+                . pack('v', 0)                     // disk number start
+                . pack('v', 0)                     // internal file attributes
+                . pack('V', 0)                     // external file attributes
+                . pack('V', $offset)               // relative offset of local header
+                . $name;
+
+            $offset += \strlen($local);
+            $localParts .= $local;
+        }
+
+        $fileCount      = \count($files);
+        $centralDirSize = \strlen($centralDir);
+
+        $end = pack('V', 0x06054b50)     // end of central dir signature
+            . pack('v', 0)               // number of this disk
+            . pack('v', 0)               // disk with start of central dir
+            . pack('v', $fileCount)      // entries on this disk
+            . pack('v', $fileCount)      // total entries
+            . pack('V', $centralDirSize) // size of central dir
+            . pack('V', $offset)         // offset of central dir
+            . pack('v', 0);              // comment length
+
+        return $localParts . $centralDir . $end;
     }
 
     private function buildSheet(array $headers, array $rows): string
