@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Http\Controllers;
+use App\Concerns\ConvertsToAppTimezone;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
@@ -23,6 +24,8 @@ use DateTime;
 
 class ApiAttendaceController extends Controller
 {
+    use ConvertsToAppTimezone;
+
     public function get_attendance_type(Request $request)
     {
         $attendance_types = AttendaceTypeModel::orderBy('id', 'desc')->get();
@@ -445,8 +448,14 @@ class ApiAttendaceController extends Controller
         }
 
         $cur_user = Auth::guard('api')->user();
-        $attendance_date = date('Y-m-d', strtotime($request->date_time));
-        $attendance_time = date('H:i:s', strtotime($request->date_time));
+
+        // Convert the device's local capture time to UAE (Asia/Dubai) before storing,
+        // so attendance times are always recorded in Dubai time regardless of device tz.
+        [$attendance_date, $attendance_time] = $this->parseToAppTimezone(
+            $request->date_time,
+            $request->timezone,
+            $request
+        );
 
         /* =========================================
        CHECK-IN

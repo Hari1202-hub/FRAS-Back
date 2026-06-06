@@ -4,22 +4,19 @@ namespace App\Http\Controllers\API\V2;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use App\Concerns\ConvertsToAppTimezone;
 use App\Models\CheckinModel;
 use App\Models\TplUserModel;
 use App\Models\RolesAttendanceLogicModel;
 
 class AttendanceController extends BaseController
 {
-    private const COOLDOWN_SECONDS = 10;
+    use ConvertsToAppTimezone;
 
-    /** Timezone all attendance times are stored in (UAE). */
-    private const STORE_TIMEZONE = 'Asia/Dubai';
+    private const COOLDOWN_SECONDS = 10;
 
     // =========================================================================
     // CHECK-IN
@@ -38,7 +35,7 @@ class AttendanceController extends BaseController
         }
 
         $authUser      = Auth::guard('api')->user();
-        [$date, $time] = $this->parseDateTimeToDubai($request->date_time, $request->timezone, $request);
+        [$date, $time] = $this->parseToAppTimezone($request->date_time, $request->timezone, $request);
 
         // Resolve role attendance logic:
         // Priority 1 — role_id explicitly passed in the request body
@@ -98,7 +95,7 @@ class AttendanceController extends BaseController
         }
 
         $authUser      = Auth::guard('api')->user();
-        [$date, $time] = $this->parseDateTimeToDubai($request->date_time, $request->timezone, $request);
+        [$date, $time] = $this->parseToAppTimezone($request->date_time, $request->timezone, $request);
 
         // Resolve role attendance logic — same priority as check-in
         $logic          = $this->resolveRoleLogic($request->role_id ? (string) $request->role_id : null, $authUser->user_id);
@@ -205,7 +202,7 @@ class AttendanceController extends BaseController
             'date_time' => 'required|date_format:Y-m-d H:i:s',
             // NOTE: intentionally not using the strict `timezone` rule. An unknown
             // or misspelled id (e.g. "Asia/Kolkatha") must NOT reject the request;
-            // it is normalized / safely handled in parseDateTimeToDubai().
+            // it is normalized / safely handled in parseToAppTimezone().
             'timezone'  => 'nullable|string',
             'role_id'   => 'nullable|string',
             'project'   => 'nullable|string',
@@ -213,99 +210,6 @@ class AttendanceController extends BaseController
             'longitude' => 'nullable|numeric',
             'blob'      => 'nullable|string',
         ]);
-    }
-
-    /**
-     * Parse a naive "Y-m-d H:i:s" string into the device's source timezone,
-     * then forcefully convert it to Asia/Dubai (UAE) and return [date, time].
-     *
-     * Source timezone resolution order:
-     *   1. The `timezone` field in the request body (if valid).
-     *   2. The timezone of the device's IP address (geo lookup).
-     *   3. Asia/Dubai — the value is stored unchanged.
-     */
-    private function parseDateTimeToDubai(string $dateTimeStr, ?string $clientTz, Request $request): array
-    {
-        $targetTz = new \DateTimeZone(self::STORE_TIMEZONE);
-
-        // 1. Body timezone first, 2. fall back to IP-derived timezone,
-        // 3. finally treat the wall-clock time as already being UAE time.
-        $sourceTz = $this->resolveTimezone($clientTz)
-            ?: $this->timezoneFromIp($request->ip())
-            ?: $targetTz;
-
-        $dt = \DateTime::createFromFormat('Y-m-d H:i:s', $dateTimeStr, $sourceTz);
-
-        if (!$dt) {
-            // Fallback: parse leniently in the source timezone.
-            try {
-                $dt = new \DateTime($dateTimeStr, $sourceTz);
-            } catch (\Exception $e) {
-                $dt = new \DateTime('now', $targetTz);
-            }
-        }
-
-        // Always store in UAE timezone, regardless of where it was captured.
-        $dt->setTimezone($targetTz);
-
-        return [$dt->format('Y-m-d'), $dt->format('H:i:s')];
-    }
-
-    /**
-     * Turn a timezone id string into a valid DateTimeZone, or null if it is
-     * empty / not a real IANA id. Never throws.
-     */
-    private function resolveTimezone(?string $tz): ?\DateTimeZone
-    {
-        if ($tz === null || trim($tz) === '') {
-            return null;
-        }
-
-        $tz = trim($tz);
-
-        // Verify against the real IANA list so bad ids never reach the
-        // DateTimeZone constructor (which would throw "invalid timezone id").
-        if (!in_array($tz, \DateTimeZone::listIdentifiers(), true)) {
-            return null;
-        }
-
-        try {
-            return new \DateTimeZone($tz);
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Resolve the timezone of a device from its IP address using a geo lookup.
-     * Result is cached per-IP for a day. Returns null for private/reserved IPs
-     * or when the lookup fails. Never throws.
-     */
-    private function timezoneFromIp(?string $ip): ?\DateTimeZone
-    {
-        // No public geo data exists for missing / private / reserved addresses
-        // (e.g. localhost, 192.168.x, 10.x), so skip the lookup entirely.
-        if (!$ip || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-            return null;
-        }
-
-        $tzId = Cache::remember("ip_timezone:{$ip}", now()->addDay(), function () use ($ip) {
-            try {
-                $resp = Http::timeout(3)->get("http://ip-api.com/json/{$ip}", [
-                    'fields' => 'status,timezone',
-                ]);
-
-                if ($resp->ok() && $resp->json('status') === 'success') {
-                    return $resp->json('timezone'); // e.g. "Asia/Kolkata"
-                }
-            } catch (\Throwable $e) {
-                Log::warning('IP timezone lookup failed', ['ip' => $ip, 'error' => $e->getMessage()]);
-            }
-
-            return null;
-        });
-
-        return $this->resolveTimezone($tzId);
     }
 
     /**
