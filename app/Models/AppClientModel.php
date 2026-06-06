@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
-class AppClientModel extends Model
+class AppClientModel extends BaseModel
 {
     protected $table    = 'tbl_app_clients';
     protected $fillable = [

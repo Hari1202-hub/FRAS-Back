@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
-class ProjectModel extends Model
+class ProjectModel extends BaseModel
 {
     public $timestamps = true;
     protected $table    = 'tbl_project';

@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class AuditLogModel extends Model
+class AuditLogModel extends BaseModel
 {
     public $timestamps = false;
     protected $table    = 'tbl_auditlog';

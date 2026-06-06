@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class RoleModel extends Model
+class RoleModel extends BaseModel
 {
     public $timestamps = true;
     protected $table    = 'tbl_role';

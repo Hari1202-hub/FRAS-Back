@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class PayloadLogModel extends Model
+class PayloadLogModel extends BaseModel
 {
     public $timestamps = true;
     protected $table    = 'tbl_payloadlog';

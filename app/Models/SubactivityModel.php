@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class SubactivityModel extends Model
+class SubactivityModel extends BaseModel
 {
     protected $table    = 'tbl_sub_activities';
     protected $fillable = ['guid','projectid','activity_id','sub_activity_id','ref_activity_id','completion_percentage','description','unit','qty','startdate','enddate','status','isactive'];

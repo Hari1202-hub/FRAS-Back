@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class AppAccessLog extends Model
+class AppAccessLog extends BaseModel
 {
     public $timestamps = false;
 

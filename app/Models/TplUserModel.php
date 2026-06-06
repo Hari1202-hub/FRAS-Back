@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class TplUserModel extends Model
+class TplUserModel extends BaseModel
 {
     protected $table    = 'tbl_user';
     protected $fillable = ['name', 'guid', 'email', 'mobile', 'category_code', 'classification_code', 'entity_id', 'loginmethod_code', 'isactive'];

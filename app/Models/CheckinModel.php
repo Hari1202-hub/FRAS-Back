@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class CheckinModel extends Model
+class CheckinModel extends BaseModel
 {
     protected $table    = 'tbl_user_checin_checkout';
 protected $fillable = [

@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class UserProjectModel extends Model
+class UserProjectModel extends BaseModel
 {
     public $timestamps = true;
     protected $table    = 'tbl_user_project';

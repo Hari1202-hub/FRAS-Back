@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class AssetModel extends Model
+class AssetModel extends BaseModel
 {
     protected $table    = 'tbl_asset';
     protected $fillable = ['guid','asset_id','asset_name','asset_type','qr_code','qr_code_img','ref_asset_id','isactive'];

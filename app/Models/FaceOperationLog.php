@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class FaceOperationLog extends Model
+class FaceOperationLog extends BaseModel
 {
     protected $fillable = [
         'session_id',
