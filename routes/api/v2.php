@@ -13,6 +13,7 @@ use App\Http\Controllers\API\V2\AppAuthController;
 use App\Http\Controllers\API\V2\AppVectorController;
 use App\Http\Controllers\API\V2\TemplateController;
 use App\Http\Controllers\API\V2\EntityController;
+use App\Http\Controllers\API\V2\PaydaySyncController;
 
 // ─── Public Routes ────────────────────────────────────────────────────────────
 Route::post('auth/login', [AuthController::class, 'login']);
@@ -20,6 +21,10 @@ Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
 // Refresh accepts an expired JWT — must be outside the auth middleware
 Route::post('auth/refresh', [AuthController::class, 'refresh']);
+
+// Payday HCM attendance push — called by an external cron (hourly).
+// Guarded by a shared secret (X-Payday-Secret header or ?secret=), not user auth.
+Route::match(['get', 'post'], 'payday/sync', [PaydaySyncController::class, 'sync']);
 
 // ─── Protected Routes ─────────────────────────────────────────────────────────
 Route::middleware('check.api.auth')->group(function () {
